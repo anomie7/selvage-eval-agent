@@ -186,14 +186,92 @@ commands = [
    - Squash merge: 포함 (압축된 의미있는 변경)
    - Feature branch merge: 조건부 포함 (변경량 기준)
 
-3. **변경 통계 기준**:
-   - 최소 변경 파일 수: 2-10개
-   - 최소 변경 라인 수: 50+ 라인
-   - 파일 타입 필터: `.py`, `.js`, `.ts`, `.java`, `.cpp`, `.rs`
+3. **변경 통계 기준** (selvage-eval-config.yml의 commit_filters.stats 기반):
+   - **파일 수 범위**: 2-10개 (min_files: 2, max_files: 10)
+     - 최소 2개: 단일 파일 변경은 너무 제한적
+     - 최대 10개: 과도한 변경은 리뷰 복잡도 증가로 평가 어려움
+   - **변경 라인 수**: 최소 50라인 (min_lines: 50)
+     - trivial한 변경 제외하고 의미있는 코드 변경만 선별
+     - 단순 포맷팅, 오타 수정 등 배제
+   - **파일 타입 필터 없음**: 
+     - 모든 파일 포함
+     - 특정 파일 타입에 대한 가중치는 배점 단계에서 처리
+   - **추가 필터링 조건**:
+     - 머지 커밋 중 fast-forward는 제외 (실제 변경사항 없음)
+     - 충돌 해결, 스쿼시 머지는 포함 (의미있는 변경)
+     - 키워드 기반 필터링: include(fix, feature, refactor, improve, add, update) / exclude(typo, format, style, docs, chore)
 
-4. **파일명 패턴 필터링**:
-   - 포함: 소스코드 파일
-   - 제외: 설정 파일, 문서, 테스트 전용 파일
+
+5. **커밋 배점 기준** (git 명령어 기반 측정, 총 100점):
+
+   **A. 파일 타입 감점 조정 (기본 100점에서 감점)**
+   ```bash
+   # git show --name-only <commit-hash> | 비-코드 파일 감점 처리
+   ```
+   - **모든 파일을 코드로 간주** (jsx, tsx, vue, svelte 등 자동 포함)
+   - **비-코드 파일 감점**: 각 -5점
+     - 문서: `.txt`, `.rst`, `.adoc`, `.doc`, `.docx`, `.pdf`
+     - 이미지/미디어: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.mp4`, `.mp3`, `.wav`
+     - 압축/바이너리: `.zip`, `.tar`, `.gz`, `.exe`, `.dll`, `.so`, `.dylib`, `.bin`
+     - 자동생성: `package-lock.json`, `*.lock`, `*.cache`
+   - **경미한 감점 파일**: 각 -2점
+     - 설정: `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.env`, `md`, `mdc` (복잡한 로직 가능)
+     - 빌드: `Dockerfile`, `Makefile`, `requirements.txt` (스크립트 로직 포함)
+   - **예시**: 소스코드 3개 + README.md 1개 = 100점 - 2점 = 98점
+
+   **B. 변경 규모 적정성 (25점)**
+   ```bash
+   # git show --stat <commit-hash> | 변경 통계 분석
+   ```
+   - **파일 수 적정성**: 10점
+     - 2-4개 파일: +10점 (리뷰 집중도 최적)
+     - 5-7개 파일: +7점 (적정 범위)
+     - 8-10개 파일: +4점 (복잡도 증가)
+   - **변경 라인 수 밸런스**: 15점
+     - 50-200라인: +15점 (의미있는 변경)
+     - 201-400라인: +10점 (중규모 변경)  
+     - 401-600라인: +5점 (대규모, 리뷰 어려움)
+     - 추가/삭제 비율이 극단적인 경우 -5점 (단순 삭제나 복붙)
+
+   **C. 커밋 특성 (25점)**
+   ```bash
+   # git log --oneline <commit-hash> | 메시지 키워드 분석
+   # git show --name-only <commit-hash> | 경로 패턴 분석
+   ```
+   - **긍정 키워드**: 각 +5점 (최대 15점)
+     - `fix`, `refactor`, `improve`, `optimize`, `enhance`
+     - `feature`, `implement`, `add`, `update`
+     - `security`, `performance`, `bug`
+   - **부정 키워드**: 각 -3점
+     - `typo`, `format`, `style`, `whitespace`, `lint`
+     - `merge`, `revert`, `backup`
+   - **경로 패턴 가중치**: 10점
+     - 핵심 로직 경로 (`src/`, `lib/`, `core/`): +10점
+     - 유틸리티 (`utils/`, `helpers/`): +7점
+     - 설정/빌드 (`config/`, `build/`, `.github/`): -5점
+
+   **D. 시간 가중치 (20점)**
+   ```bash
+   # git log --date=short <commit-hash> | 날짜 확인
+   ```
+   - **커밋 시기 신선도**:
+     - 최근 1개월: +20점 (최신 코드 스타일)
+     - 최근 3개월: +15점
+     - 최근 6개월: +10점
+     - 최근 1년: +5점
+     - 그 이상: +2점
+
+   **E. 추가 조정 사항**
+   - **머지 커밋 처리** (`git show --merges`):
+     - Fast-forward 머지: -10점 (변경사항 없음)
+     - 충돌 해결 머지: +5점 (복잡한 변경)
+     - 스쿼시 머지: +3점 (정리된 변경)
+   - **작성자 다양성**: 동일 작성자 연속 커밋 시 각 -2점
+
+   **최종 점수**: A + B + C + D + 조정사항 (0-100점으로 정규화)
+
+6. ** 배점 계산 후 commits_per_repo 만큼 커밋을 선별하여 저장**
+
 
 #### 데이터 스키마
 파일명 : meaningful_commits.json
@@ -438,24 +516,7 @@ test_case = {
 ```
 
 #### 평가 메트릭 구현
-```python
-from deepeval.metrics import (
-    AnswerRelevancyMetric,
-    FaithfulnessMetric,
-    ContextualPrecisionMetric,
-    ContextualRecallMetric
-)
 
-# 커스텀 메트릭 정의
-class CodeReviewQualityMetric(BaseMetric):
-    def measure(self, test_case):
-        # 코드 리뷰 품질 측정 로직
-        pass
-
-class CostEfficiencyMetric(BaseMetric):
-    def measure(self, test_case):
-        # 비용 효율성 측정 로직
-        pass
 ```
 
 ### 4단계: 결과 분석 및 비교
@@ -538,66 +599,6 @@ async def process_commits_parallel(commits, models):
 4. **데이터 변환**: JSON 파싱 및 변환 시간
 5. **평가 실행**: DeepEval 메트릭 계산 시간
 
-## 에러 처리 및 복구 전략
-
-### 계층적 에러 처리
-```python
-class SelvageEvaluationError(Exception):
-    """Selvage 평가 관련 기본 예외"""
-    pass
-
-class GitOperationError(SelvageEvaluationError):
-    """Git 작업 실패"""
-    pass
-
-class SelvageExecutionError(SelvageEvaluationError):
-    """Selvage 실행 실패"""
-    pass
-
-class ModelAPIError(SelvageEvaluationError):
-    """모델 API 호출 실패"""
-    pass
-```
-
-### 재시도 로직
-```python
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-async def run_selvage_with_retry(commit_id: str, model: str) -> dict:
-    """재시도 로직이 포함된 Selvage 실행"""
-    try:
-        return await run_selvage_review(commit_id, model)
-    except subprocess.TimeoutExpired:
-        raise SelvageExecutionError(f"Timeout for {commit_id} with {model}")
-    except subprocess.CalledProcessError as e:
-        raise SelvageExecutionError(f"Process failed: {e.stderr}")
-```
-
-### 실패 복구 전략
-1. **부분 실패 허용**: 일부 커밋/모델 조합 실패 시 계속 진행
-2. **체크포인트 저장**: 단계별 중간 결과 저장
-3. **재개 가능**: 실패 지점부터 재시작 가능
-
-## 데이터 관리 및 저장
-
-### 디렉토리 구조
-```
-selvage-eval-results/
-├── commits/
-│   └── filtered_commits.json
-├── reviews/
-│   ├── {commit_id}/
-│   │   ├── {model_name}/
-│   │   │   ├── review.json
-│   │   │   ├── metrics.json
-│   │   │   └── timing.json
-│   │   └── metadata.json
-├── evaluations/
-│   ├── deepeval_results.json
-│   └── comparative_analysis.json
-└── logs/
-    ├── agent.log
-    └── error.log
-```
 
 ### 메타데이터 관리 (자동 생성)
 ```json
