@@ -20,12 +20,175 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 자동화 에이전트
 ## Single Agent 아키텍처 패러다임
 
 ### ReAct (Reasoning + Acting) 패턴
-Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 4단계 워크플로우를 순차 실행합니다.
+Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 두 가지 모드를 지원합니다:
+1. **자동 실행 모드**: 4단계 워크플로우 순차 실행
+2. **대화형 모드**: 사용자 요청에 따른 동적 액션 실행
+
+### Interactive Agent Interface
+
+에이전트는 터미널에서 사용자와 실시간으로 상호작용하며 다음과 같은 요청을 처리합니다:
+
+#### 지원하는 상호작용 유형
+1. **Phase 관련 작업**
+   - "Phase 1 상태 확인해줘"
+   - "Phase 2 실행해줘" 
+   - "어떤 단계까지 완료됐어?"
+
+2. **저장된 Commit 관련 질문**
+   - "cline 저장소 commit 목록 보여줘"
+   - "선별된 commit들의 상세 정보는?"
+   - "commit scoring 결과는?"
+
+3. **리뷰 결과 데이터 질문**
+   - "gemini-2.5-pro 리뷰 결과 보여줘"
+   - "실패한 리뷰들은 어떤 것들이야?"
+   - "모델별 리뷰 완료 현황은?"
+
+4. **LLM Eval 실행 요청**
+   - "deepeval 실행해줘"
+   - "특정 모델 결과만 평가해줘"
+   - "평가 재실행해줘"
+
+5. **LLM Eval Result 분석**
+   - "평가 결과 요약해줘"
+   - "모델별 성능 비교해줘"
+   - "어떤 모델이 가장 좋아?"
+
+#### LLM-Based Query Analysis System
+
+현대적 에이전트 패턴을 적용하여 LLM이 사용자 쿼리를 분석하고 실행 계획을 수립합니다:
+
+```python
+QUERY_ANALYSIS_PROMPT = """
+# ROLE
+당신은 Selvage 평가 에이전트의 Query Planner입니다.
+사용자 쿼리를 분석하여 실행 계획을 수립하고 필요한 도구들을 식별합니다.
+
+# QUERY EXAMPLES
+다음과 같은 다양한 사용자 질문들을 처리할 수 있습니다:
+
+**상태 조회:**
+- "Phase 1 완료됐어?"
+- "현재 어떤 상황이야?"
+- "cline 저장소 진행 상황은?"
+
+**데이터 조회:**
+- "선별된 커밋 목록 보여줘"
+- "gemini 모델 리뷰 결과는?"
+- "실패한 평가들 알려줘"
+
+**실행 요청:**
+- "Phase 2 실행해줘"
+- "deepeval 돌려줘"
+- "특정 저장소만 다시 평가해줘"
+
+**분석 요청:**
+- "모델별 성능 비교해줘"
+- "어떤 에러가 많이 발생했어?"
+- "결과를 차트로 보여줄 수 있어?"
+
+# STRICT CONSTRAINTS
+다음 작업들은 절대 수행하지 마세요:
+
+🚫 **절대 금지:**
+- 원본 저장소 파일 수정/삭제
+- selvage-deprecated 저장소 쓰기 작업
+- 시스템 파일 접근
+- API 키나 민감한 정보 노출
+- 평가 결과 데이터 조작
+- 네트워크 외부 연결 (승인되지 않은)
+
+# PROJECT FILE STRUCTURE
+현재 작업 디렉토리 구조를 숙지하고 적절한 파일 경로를 사용하세요:
+
+```
+selvage-eval-results/
+├── session_metadata.json          # 세션 정보 및 설정
+├── meaningful_commits.json        # Phase 1: 선별된 커밋 목록
+├── review_logs/                   # Phase 2: 리뷰 실행 결과
+│   ├── {repo_name}/
+│   │   ├── {commit_hash}/
+│   │   │   ├── {model_name}_review.json
+│   │   │   └── {model_name}_error.log
+├── evaluations/                   # Phase 3: DeepEval 결과
+│   ├── deepeval_testcases.json   # 변환된 테스트케이스
+│   ├── evaluation_results.json   # 평가 결과
+│   └── metrics_breakdown.json    # 메트릭별 상세 분석
+└── analysis/                     # Phase 4: 최종 분석
+    ├── statistical_summary.json  # 통계 요약
+    ├── model_comparison.json     # 모델별 성능 비교
+    └── insights_report.json      # 도출된 인사이트
+```
+
+# AVAILABLE TOOLS
+{available_tools}
+
+# COMMON COMMANDS FOR DATA ANALYSIS
+다음과 같은 명령어들을 활용하여 데이터를 분석할 수 있습니다:
+
+```bash
+# JSON 데이터 쿼리
+jq '.commits[] | select(.repository=="cline")' meaningful_commits.json
+jq '.evaluations | group_by(.model) | map({model: .[0].model, avg_score: (map(.score) | add/length)})' evaluation_results.json
+
+# 파일 검색 및 분석
+find ./review_logs -name "*_error.log" -exec wc -l {} +
+grep -r "success.*true" ./review_logs/ | wc -l
+
+# 로그 분석
+cat ./review_logs/cline/abc123/gemini-2.5-pro_review.json | jq '.review_content'
+tail -f ./review_logs/*/*/error.log  # 실시간 에러 모니터링
+```
+
+# TASK
+사용자 쿼리를 분석하고 안전하고 효과적인 실행 계획을 JSON으로 제공하세요.
+
+Response format:
+{{
+  "intent_summary": "사용자 의도 요약",
+  "confidence": 0.0-1.0,
+  "parameters": {{}},
+  "tool_calls": [
+    {{"tool": "tool_name", "params": {{}}, "rationale": "이 도구를 선택한 이유"}}
+  ],
+  "safety_check": "안전성 검토 결과",
+  "expected_outcome": "예상 결과"
+}}
+"""
+
+@dataclass
+class ExecutionPlan:
+    """LLM이 생성한 실행 계획"""
+    intent_summary: str
+    confidence: float
+    parameters: Dict[str, Any]
+    tool_calls: List[ToolCall]
+    safety_check: str
+    expected_outcome: str
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'ExecutionPlan':
+        data = json.loads(json_str)
+        return cls(
+            intent_summary=data["intent_summary"],
+            confidence=data["confidence"],
+            parameters=data["parameters"],
+            tool_calls=[ToolCall(**tc) for tc in data["tool_calls"]],
+            safety_check=data["safety_check"],
+            expected_outcome=data["expected_outcome"]
+        )
+
+@dataclass
+class ToolCall:
+    tool: str
+    params: Dict[str, Any]
+    rationale: str
 
 ```python
 class SelvageEvaluationAgent:
     """
     단일 에이전트로 전체 평가 프로세스를 관리하는 Selvage 평가 에이전트
+    대화형 모드와 자동 실행 모드를 모두 지원
     """
     
     def __init__(self, config: EvaluationConfig):
@@ -34,6 +197,120 @@ class SelvageEvaluationAgent:
         self.working_memory = WorkingMemory()
         self.session_state = SessionState()
         self.current_phase = None
+        self.llm = self._initialize_llm()  # Query Planning용 LLM
+        self.is_interactive_mode = False
+    
+    async def handle_user_message(self, message: str) -> str:
+        """
+        현대적 에이전트 패턴으로 사용자 메시지 처리
+        
+        Flow:
+        1. LLM이 쿼리 분석 및 실행 계획 수립
+        2. 계획에 따라 도구들 실행  
+        3. 도구 결과를 바탕으로 LLM이 최종 응답 생성
+        """
+        try:
+            # 1. LLM 기반 쿼리 분석 및 실행 계획 수립
+            plan = await self.plan_execution(message)
+            
+            # 2. 안전성 검증
+            if not self._validate_plan_safety(plan):
+                return f"요청하신 작업은 보안상 실행할 수 없습니다: {plan.safety_check}"
+            
+            # 3. 계획에 따라 도구들 실행
+            tool_results = []
+            for tool_call in plan.tool_calls:
+                result = await self.execute_tool(tool_call.tool, tool_call.params)
+                tool_results.append({
+                    "tool": tool_call.tool,
+                    "result": result,
+                    "rationale": tool_call.rationale
+                })
+            
+            # 4. 도구 결과를 바탕으로 LLM이 최종 응답 생성
+            return await self.generate_response(message, plan, tool_results)
+            
+        except Exception as e:
+            return f"메시지 처리 중 오류가 발생했습니다: {str(e)}"
+    
+    async def plan_execution(self, user_query: str) -> ExecutionPlan:
+        """LLM을 통한 쿼리 분석 및 실행 계획 수립"""
+        
+        # 현재 상태 정보 수집
+        current_state = await self._analyze_current_state()
+        
+        prompt = QUERY_ANALYSIS_PROMPT.format(
+            available_tools=self._get_available_tools_description()
+        )
+        
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": f"""
+현재 상태: {json.dumps(current_state, ensure_ascii=False, indent=2)}
+
+사용자 쿼리: {user_query}
+            """}
+        ]
+        
+        response = await self.llm.query(
+            messages=messages,
+            response_format="json",
+            max_tokens=1000
+        )
+        
+        return ExecutionPlan.from_json(response)
+    
+    async def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
+        """도구 실행 결과를 바탕으로 사용자에게 제공할 최종 응답 생성"""
+        
+        response_prompt = f"""
+# ROLE  
+사용자에게 도구 실행 결과를 바탕으로 명확하고 유용한 답변을 제공하는 어시스턴트입니다.
+
+# CONTEXT
+사용자 질문: {user_query}
+의도 분석: {plan.intent_summary}
+예상 결과: {plan.expected_outcome}
+
+# TOOL EXECUTION RESULTS
+{json.dumps(tool_results, ensure_ascii=False, indent=2)}
+
+# TASK
+도구 실행 결과를 바탕으로 사용자가 이해하기 쉬운 답변을 생성하세요.
+- 핵심 정보를 명확히 전달
+- 필요시 표나 리스트 형태로 구조화  
+- 다음 단계 제안 (해당되는 경우)
+        """
+        
+        response = await self.llm.query(
+            messages=[{"role": "user", "content": response_prompt}],
+            max_tokens=1500
+        )
+        
+        return response
+    
+    def _validate_plan_safety(self, plan: ExecutionPlan) -> bool:
+        """실행 계획의 안전성 검증"""
+        
+        # 금지된 도구 확인
+        forbidden_tools = ["delete_file", "modify_repository", "system_command"]
+        for tool_call in plan.tool_calls:
+            if tool_call.tool in forbidden_tools:
+                return False
+        
+        # selvage-deprecated 쓰기 작업 확인
+        for tool_call in plan.tool_calls:
+            if "selvage-deprecated" in str(tool_call.params) and tool_call.tool.startswith("write"):
+                return False
+        
+        return True
+    
+    def _get_available_tools_description(self) -> str:
+        """사용 가능한 도구들의 설명 반환"""
+        descriptions = []
+        for tool_name, tool in self.tools.items():
+            descriptions.append(f"- {tool_name}: {tool.description}")
+        return "\n".join(descriptions)
     
     async def execute_evaluation(self) -> EvaluationReport:
         """
@@ -166,18 +443,90 @@ class SelvageEvaluationAgent:
 
 도구는 크게 **기본 유틸리티 도구**와 **Phase별 전용 도구**로 분류됩니다:
 
-#### 기본 유틸리티 도구 (모든 Phase에서 공통 사용)
-- `execute_terminal`: 터미널 명령어 실행 (git, selvage, 파일 작업 등)
-- `read_file`: 파일 내용 읽기 (JSON, 로그, 설정 파일 등)
-- `write_file`: 파일 쓰기 (결과 저장, 임시 파일 생성 등)
-- `list_directory`: 디렉토리 내용 조회
-- `file_exists`: 파일/디렉토리 존재 확인
+#### 현대적 에이전트 도구 체계
 
-#### Phase별 전용 도구
-- **Phase 1**: `git_log`, `commit_scoring`
-- **Phase 2**: `selvage_executor`
-- **Phase 3**: `review_log_scanner`, `deepeval_converter`, `metric_evaluator`
-- **Phase 4**: `statistical_analysis`
+Claude Code, Cursor와 같은 현대적 에이전트 패턴을 적용하여 **범용 도구 + 적절한 제약** 방식을 사용합니다:
+
+**🔧 핵심 범용 도구 (모든 작업에 사용)**
+- `read_file`: 안전한 파일 읽기 (평가 결과 디렉토리 내에서만)
+- `write_file`: 안전한 파일 쓰기 (결과 저장용)
+- `execute_safe_command`: 제한된 안전 명령어 실행
+- `list_directory`: 디렉토리 탐색 (허용된 경로 내에서만)
+
+**📂 프로젝트 파일 구조 (LLM이 숙지해야 할 컨텍스트)**
+```
+selvage-eval-results/
+├── session_metadata.json          # 세션 정보 및 설정
+├── meaningful_commits.json        # Phase 1: 선별된 커밋 목록
+├── review_logs/                   # Phase 2: 리뷰 실행 결과
+│   ├── {repo_name}/
+│   │   ├── {commit_hash}/
+│   │   │   ├── {model_name}_review.json
+│   │   │   └── {model_name}_error.log
+├── evaluations/                   # Phase 3: DeepEval 결과
+│   ├── deepeval_testcases.json   # 변환된 테스트케이스
+│   ├── evaluation_results.json   # 평가 결과
+│   └── metrics_breakdown.json    # 메트릭별 상세 분석
+└── analysis/                     # Phase 4: 최종 분석
+    ├── statistical_summary.json  # 통계 요약
+    ├── model_comparison.json     # 모델별 성능 비교
+    └── insights_report.json      # 도출된 인사이트
+```
+
+**🛡️ 안전 제약사항 (execute_safe_command용)**
+
+허용된 명령어:
+```bash
+# 데이터 조회 및 분석
+jq, grep, find, ls, cat, head, tail, wc
+git log, git show, git diff (읽기 전용)
+
+# 파일 처리
+cp, mv (결과 디렉토리 내에서만)
+mkdir, touch (결과 디렉토리 내에서만)
+
+# Selvage 실행
+/Users/demin_coder/.local/bin/selvage (subprocess로만)
+```
+
+금지된 작업:
+```bash
+# 절대 금지
+rm, rmdir, delete (원본 저장소 손상 방지)
+chmod, chown (권한 변경 금지)
+curl, wget (외부 네트워크 금지)
+sudo, su (권한 상승 금지)
+
+# 원본 저장소 쓰기 금지
+git commit, git push, git merge
+echo >, sed -i, awk (파일 수정 명령)
+```
+
+**🎯 실제 사용 예시**
+
+사용자: "cline 저장소에서 최근 일주일 내 fix 관련 커밋만 보여줘"
+
+LLM 계획:
+```json
+{
+  "tool_calls": [
+    {
+      "tool": "read_file",
+      "params": {"file_path": "./selvage-eval-results/meaningful_commits.json"},
+      "rationale": "저장된 커밋 데이터 읽기"
+    },
+    {
+      "tool": "execute_safe_command", 
+      "params": {
+        "command": "jq '.commits[] | select(.repository==\"cline\" and (.message | contains(\"fix\")) and (.date | fromdateiso8601 > (now - 7*24*3600)))' ./selvage-eval-results/meaningful_commits.json"
+      },
+      "rationale": "cline 저장소에서 최근 일주일 내 fix 관련 커밋 필터링"
+    }
+  ]
+}
+```
+
+이 방식으로 특수한 도구 없이도 복잡한 쿼리를 유연하게 처리할 수 있습니다.
 
 모든 도구는 단일 에이전트가 사용하는 유틸리티로서 표준화된 인터페이스를 구현합니다:
 
@@ -231,18 +580,38 @@ class Tool(ABC):
 
 ### 기본 유틸리티 도구 구현
 
-**ExecuteTerminalTool** - 터미널 명령어 실행
+**ExecuteSafeCommandTool** - 제한된 안전 명령어 실행
 ```python
-class ExecuteTerminalTool(Tool):
-    """터미널 명령어 실행 도구 (모든 Phase에서 사용)"""
+class ExecuteSafeCommandTool(Tool):
+    """제한된 안전 명령어 실행 도구 (현대적 에이전트 패턴)"""
+    
+    def __init__(self):
+        self.allowed_commands = {
+            'jq', 'grep', 'find', 'ls', 'cat', 'head', 'tail', 'wc',
+            'git', 'cp', 'mv', 'mkdir', 'touch'
+        }
+        self.allowed_paths = [
+            './selvage-eval-results/',
+            '/Users/demin_coder/Dev/cline',
+            '/Users/demin_coder/Dev/selvage-deprecated',
+            '/Users/demin_coder/Dev/ecommerce-microservices', 
+            '/Users/demin_coder/Dev/kotlin-realworld'
+        ]
+        self.forbidden_patterns = [
+            r'rm\s+', r'rmdir\s+', r'delete\s+',
+            r'chmod\s+', r'chown\s+',
+            r'curl\s+', r'wget\s+',
+            r'sudo\s+', r'su\s+',
+            r'echo\s+.*>', r'sed\s+-i', r'>\s*'
+        ]
     
     @property
     def name(self) -> str:
-        return "execute_terminal"
+        return "execute_safe_command"
     
     @property
     def description(self) -> str:
-        return "터미널 명령어를 실행하고 결과를 반환합니다"
+        return "제한된 안전 명령어를 실행합니다. 데이터 조회, 분석, 읽기 전용 Git 작업만 허용"
     
     @property
     def parameters_schema(self) -> Dict[str, Any]:
@@ -277,10 +646,10 @@ class ExecuteTerminalTool(Tool):
         
         try:
             # 보안을 위한 명령어 검증
-            if self._is_dangerous_command(command):
+            if not self._validate_command_safety(command):
                 return ToolResult(
                     success=False,
-                    error_message=f"Dangerous command blocked: {command}"
+                    error_message=f"Command blocked by safety filters: {command}"
                 )
             
             # 명령어 실행
@@ -318,10 +687,50 @@ class ExecuteTerminalTool(Tool):
                 error_message=f"Failed to execute command: {str(e)}"
             )
     
-    def _is_dangerous_command(self, command: str) -> bool:
-        """위험한 명령어 검증"""
-        dangerous_commands = ["rm -rf", "format", "del /s", "shutdown", "reboot"]
-        return any(danger in command.lower() for danger in dangerous_commands)
+    def _validate_command_safety(self, command: str) -> bool:
+        """현대적 에이전트 패턴의 안전성 검증"""
+        import re
+        import shlex
+        
+        # 금지된 패턴 확인
+        for pattern in self.forbidden_patterns:
+            if re.search(pattern, command, re.IGNORECASE):
+                return False
+        
+        # 명령어 파싱 및 허용 목록 확인
+        try:
+            tokens = shlex.split(command)
+            if not tokens:
+                return False
+                
+            base_command = tokens[0].split('/')[-1]  # 경로에서 명령어만 추출
+            
+            if base_command not in self.allowed_commands:
+                return False
+            
+            # 특별 처리: git 명령어는 읽기 전용만 허용
+            if base_command == 'git':
+                if len(tokens) < 2:
+                    return False
+                git_subcommand = tokens[1]
+                allowed_git_commands = {'log', 'show', 'diff', 'status', 'branch'}
+                if git_subcommand not in allowed_git_commands:
+                    return False
+            
+            return True
+            
+        except ValueError:  # shlex.split 실패
+            return False
+    
+    def _validate_path_access(self, path: str) -> bool:
+        """경로 접근 권한 검증"""
+        import os
+        abs_path = os.path.abspath(path)
+        
+        for allowed_path in self.allowed_paths:
+            if abs_path.startswith(os.path.abspath(allowed_path)):
+                return True
+        return False
 ```
 
 **ReadFileTool** - 파일 읽기

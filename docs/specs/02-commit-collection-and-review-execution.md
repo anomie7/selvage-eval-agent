@@ -351,6 +351,79 @@ results = await asyncio.gather(*tasks)
 ### Phase 1 Tools: Commit Collection
 
 #### GitLogTool - Git 로그 조회
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "git_log",
+    "description": "지정된 저장소에서 커밋 로그를 조회합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "저장소 경로"
+        },
+        "since": {
+          "type": "string",
+          "description": "시작 날짜 (YYYY-MM-DD 형식)"
+        },
+        "until": {
+          "type": "string",
+          "description": "종료 날짜 (YYYY-MM-DD 형식)"
+        },
+        "grep": {
+          "type": "string",
+          "description": "커밋 메시지에서 검색할 키워드"
+        },
+        "max_count": {
+          "type": "integer",
+          "description": "조회할 최대 커밋 수"
+        }
+      },
+      "required": ["repo_path"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "git_log",
+  "description": "지정된 저장소에서 커밋 로그를 조회합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "repo_path": {
+        "type": "string",
+        "description": "저장소 경로"
+      },
+      "since": {
+        "type": "string",
+        "description": "시작 날짜 (YYYY-MM-DD 형식)"
+      },
+      "until": {
+        "type": "string",
+        "description": "종료 날짜 (YYYY-MM-DD 형식)"
+      },
+      "grep": {
+        "type": "string",
+        "description": "커밋 메시지에서 검색할 키워드"
+      },
+      "max_count": {
+        "type": "integer",
+        "description": "조회할 최대 커밋 수"
+      }
+    },
+    "required": ["repo_path"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class GitLogTool(Tool):
     """Git 커밋 로그를 조회하는 도구"""
@@ -433,6 +506,73 @@ class GitLogTool(Tool):
 ```
 
 #### CommitScoringTool - 커밋 배점 도구
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "commit_scoring",
+    "description": "커밋의 평가 가치를 배점하여 의미있는 커밋을 선별합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "commit_hash": {
+          "type": "string",
+          "description": "평가할 커밋의 해시값"
+        },
+        "repo_path": {
+          "type": "string",
+          "description": "Git 저장소 경로"
+        },
+        "scoring_config": {
+          "type": "object",
+          "description": "배점 설정 (선택사항)",
+          "properties": {
+            "file_type_weight": {"type": "number", "description": "파일 타입 가중치"},
+            "scale_weight": {"type": "number", "description": "변경 규모 가중치"},
+            "characteristic_weight": {"type": "number", "description": "커밋 특성 가중치"}
+          }
+        }
+      },
+      "required": ["commit_hash", "repo_path"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "commit_scoring",
+  "description": "커밋의 평가 가치를 배점하여 의미있는 커밋을 선별합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "commit_hash": {
+        "type": "string",
+        "description": "평가할 커밋의 해시값"
+      },
+      "repo_path": {
+        "type": "string",
+        "description": "Git 저장소 경로"
+      },
+      "scoring_config": {
+        "type": "object",
+        "description": "배점 설정 (선택사항)",
+        "properties": {
+          "file_type_weight": {"type": "number", "description": "파일 타입 가중치"},
+          "scale_weight": {"type": "number", "description": "변경 규모 가중치"},
+          "characteristic_weight": {"type": "number", "description": "커밋 특성 가중치"}
+        }
+      }
+    },
+    "required": ["commit_hash", "repo_path"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 @dataclass
 class CommitScore:
@@ -719,6 +859,73 @@ class CommitScoringTool(Tool):
 ### Phase 2 Tools: Review Execution
 
 #### SelvageExecutorTool - Selvage 리뷰 실행
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "selvage_executor",
+    "description": "Selvage를 실행하여 코드 리뷰를 수행합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "Git 저장소 경로"
+        },
+        "commit_hash": {
+          "type": "string",
+          "description": "리뷰할 커밋의 해시값"
+        },
+        "model": {
+          "type": "string",
+          "description": "사용할 AI 모델 (예: gpt-4, claude-3-sonnet)",
+          "enum": ["gpt-4", "gpt-3.5-turbo", "claude-3-sonnet", "claude-3-haiku"]
+        },
+        "log_dir": {
+          "type": "string",
+          "description": "리뷰 로그를 저장할 디렉토리 경로 (기본값: ~/Library/selvage-eval-agent/review_logs)"
+        }
+      },
+      "required": ["repo_path", "commit_hash", "model"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "selvage_executor",
+  "description": "Selvage를 실행하여 코드 리뷰를 수행합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "repo_path": {
+        "type": "string",
+        "description": "Git 저장소 경로"
+      },
+      "commit_hash": {
+        "type": "string",
+        "description": "리뷰할 커밋의 해시값"
+      },
+      "model": {
+        "type": "string",
+        "description": "사용할 AI 모델 (예: gpt-4, claude-3-sonnet)",
+        "enum": ["gpt-4", "gpt-3.5-turbo", "claude-3-sonnet", "claude-3-haiku"]
+      },
+      "log_dir": {
+        "type": "string",
+        "description": "리뷰 로그를 저장할 디렉토리 경로 (기본값: ~/Library/selvage-eval-agent/review_logs)"
+      }
+    },
+    "required": ["repo_path", "commit_hash", "model"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class SelvageExecutorTool(Tool):
     """Selvage 코드 리뷰 실행 도구"""

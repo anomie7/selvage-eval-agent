@@ -1035,6 +1035,45 @@ def compare_models(results: Dict[str, List[EvaluationResult]]) -> ComparisonRepo
 ### Phase 3 Tools: DeepEval Conversion
 
 #### ReviewLogScannerTool - 리뷰 로그 스캔
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "review_log_scanner",
+    "description": "리뷰 로그 디렉토리를 스캔하여 모든 리뷰 로그 파일을 찾고 메타데이터를 추출합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "base_path": {
+          "type": "string",
+          "description": "리뷰 로그 기본 경로 (기본값: ~/Library/selvage-eval-agent/review_logs)"
+        }
+      }
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "review_log_scanner",
+  "description": "리뷰 로그 디렉토리를 스캔하여 모든 리뷰 로그 파일을 찾고 메타데이터를 추출합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "base_path": {
+        "type": "string",
+        "description": "리뷰 로그 기본 경로 (기본값: ~/Library/selvage-eval-agent/review_logs)"
+      }
+    }
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class ReviewLogScannerTool(Tool):
     """리뷰 로그 파일 스캔 및 메타데이터 추출"""
@@ -1133,6 +1172,84 @@ class ReviewLogScannerTool(Tool):
 ```
 
 #### DeepEvalConverterTool - DeepEval 형식 변환
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "deepeval_converter",
+    "description": "리뷰 로그 데이터를 DeepEval 테스트 케이스 형식으로 변환합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "review_logs": {
+          "type": "array",
+          "description": "변환할 리뷰 로그 정보 리스트",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repo_name": {"type": "string"},
+              "commit_id": {"type": "string"},
+              "model_name": {"type": "string"},
+              "file_path": {"type": "string"}
+            }
+          }
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "출력 디렉토리 (기본값: ~/Library/selvage-eval-agent/deep_eval_test_case)"
+        },
+        "group_by": {
+          "type": "string",
+          "description": "그룹화 기준",
+          "enum": ["repo_model", "repo", "model"],
+          "default": "repo_model"
+        }
+      },
+      "required": ["review_logs"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "deepeval_converter",
+  "description": "리뷰 로그 데이터를 DeepEval 테스트 케이스 형식으로 변환합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "review_logs": {
+        "type": "array",
+        "description": "변환할 리뷰 로그 정보 리스트",
+        "items": {
+          "type": "object",
+          "properties": {
+            "repo_name": {"type": "string"},
+            "commit_id": {"type": "string"},
+            "model_name": {"type": "string"},
+            "file_path": {"type": "string"}
+          }
+        }
+      },
+      "output_dir": {
+        "type": "string",
+        "description": "출력 디렉토리 (기본값: ~/Library/selvage-eval-agent/deep_eval_test_case)"
+      },
+      "group_by": {
+        "type": "string",
+        "description": "그룹화 기준",
+        "enum": ["repo_model", "repo", "model"]
+      }
+    },
+    "required": ["review_logs"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class DeepEvalConverterTool(Tool):
     """리뷰 로그를 DeepEval 테스트 케이스로 변환"""
@@ -1275,6 +1392,97 @@ class DeepEvalConverterTool(Tool):
 ```
 
 #### MetricEvaluatorTool - 메트릭 평가 실행
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "metric_evaluator",
+    "description": "DeepEval 메트릭을 사용하여 테스트 케이스를 평가합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "test_case_files": {
+          "type": "array",
+          "description": "평가할 테스트 케이스 파일 목록",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file_path": {"type": "string", "description": "테스트 케이스 파일 경로"},
+              "group": {"type": "string", "description": "그룹 이름"}
+            }
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "description": "사용할 메트릭 목록",
+          "items": {
+            "type": "string",
+            "enum": ["correctness", "clarity", "actionability", "json_correctness"]
+          },
+          "default": ["correctness", "clarity", "actionability", "json_correctness"]
+        },
+        "judge_model": {
+          "type": "string",
+          "description": "평가에 사용할 judge 모델",
+          "enum": ["gpt-4", "gpt-3.5-turbo", "claude-3-sonnet"],
+          "default": "gpt-4"
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "결과 저장 디렉토리 (기본값: ~/Library/selvage-eval-agent/evaluation_results)"
+        }
+      },
+      "required": ["test_case_files"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "metric_evaluator",
+  "description": "DeepEval 메트릭을 사용하여 테스트 케이스를 평가합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "test_case_files": {
+        "type": "array",
+        "description": "평가할 테스트 케이스 파일 목록",
+        "items": {
+          "type": "object",
+          "properties": {
+            "file_path": {"type": "string", "description": "테스트 케이스 파일 경로"},
+            "group": {"type": "string", "description": "그룹 이름"}
+          }
+        }
+      },
+      "metrics": {
+        "type": "array",
+        "description": "사용할 메트릭 목록",
+        "items": {
+          "type": "string",
+          "enum": ["correctness", "clarity", "actionability", "json_correctness"]
+        }
+      },
+      "judge_model": {
+        "type": "string",
+        "description": "평가에 사용할 judge 모델",
+        "enum": ["gpt-4", "gpt-3.5-turbo", "claude-3-sonnet"]
+      },
+      "output_dir": {
+        "type": "string",
+        "description": "결과 저장 디렉토리 (기본값: ~/Library/selvage-eval-agent/evaluation_results)"
+      }
+    },
+    "required": ["test_case_files"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class MetricEvaluatorTool(Tool):
     """DeepEval 메트릭을 사용한 평가 실행"""
@@ -1491,6 +1699,89 @@ class MetricEvaluatorTool(Tool):
 ### Phase 4 Tools: Analysis and Visualization
 
 #### StatisticalAnalysisTool - 통계 분석
+
+**LLM Tool Definition (OpenAI Function Calling)**
+```javascript
+{
+  "type": "function",
+  "function": {
+    "name": "statistical_analysis",
+    "description": "평가 결과를 통계적으로 분석하여 인사이트를 도출합니다",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "evaluation_files": {
+          "type": "array",
+          "description": "분석할 평가 결과 파일 목록",
+          "items": {
+            "type": "object",
+            "properties": {
+              "result_file": {"type": "string", "description": "평가 결과 파일 경로"},
+              "group": {"type": "string", "description": "그룹 이름"}
+            }
+          }
+        },
+        "analysis_type": {
+          "type": "string",
+          "description": "분석 유형",
+          "enum": ["comprehensive", "model_comparison", "failure_pattern", "repo_analysis"],
+          "default": "comprehensive"
+        },
+        "output_dir": {
+          "type": "string",
+          "description": "결과 저장 디렉토리 (기본값: ~/Library/selvage-eval-agent/analysis_results)"
+        },
+        "generate_visualizations": {
+          "type": "boolean",
+          "description": "시각화 생성 여부",
+          "default": true
+        }
+      },
+      "required": ["evaluation_files"]
+    }
+  }
+}
+```
+
+**LLM Tool Definition (Anthropic Claude)**
+```javascript
+{
+  "name": "statistical_analysis",
+  "description": "평가 결과를 통계적으로 분석하여 인사이트를 도출합니다",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "evaluation_files": {
+        "type": "array",
+        "description": "분석할 평가 결과 파일 목록",
+        "items": {
+          "type": "object",
+          "properties": {
+            "result_file": {"type": "string", "description": "평가 결과 파일 경로"},
+            "group": {"type": "string", "description": "그룹 이름"}
+          }
+        }
+      },
+      "analysis_type": {
+        "type": "string",
+        "description": "분석 유형",
+        "enum": ["comprehensive", "model_comparison", "failure_pattern", "repo_analysis"]
+      },
+      "output_dir": {
+        "type": "string",
+        "description": "결과 저장 디렉토리 (기본값: ~/Library/selvage-eval-agent/analysis_results)"
+      },
+      "generate_visualizations": {
+        "type": "boolean",
+        "description": "시각화 생성 여부"
+      }
+    },
+    "required": ["evaluation_files"]
+  }
+}
+```
+
+**Python Implementation**
 ```python
 class StatisticalAnalysisTool(Tool):
     """DeepEval 결과 통계 분석"""
