@@ -35,145 +35,130 @@ class SelvageEvaluationAgent:
         self.session_state = SessionState()
         self.current_phase = None
     
-    async def execute_full_evaluation(self) -> EvaluationReport:
+    async def execute_evaluation(self) -> EvaluationReport:
         """
-        전체 4단계 평가 프로세스 실행
+        에이전트 방식으로 평가 프로세스 실행
+        상태를 파악하고 동적으로 다음 행동 결정
         """
         session_id = self._generate_session_id()
         
-        try:
-            # Phase 1: Commit Collection - 의미있는 커밋 수집
-            commits = await self._execute_phase1_commit_collection()
+        while True:
+            # 현재 상태 분석
+            current_state = await self._analyze_current_state()
             
-            # Phase 2: Review Execution - Selvage 리뷰 실행
-            reviews = await self._execute_phase2_review_execution(commits)
+            # 다음 행동 결정
+            next_action = await self._decide_next_action(current_state)
             
-            # Phase 3: DeepEval Conversion - 평가 형식 변환 및 실행
-            evaluations = await self._execute_phase3_deepeval_conversion(reviews)
-            
-            # Phase 4: Analysis - 결과 분석 및 인사이트 도출
-            analysis = await self._execute_phase4_analysis(evaluations)
-            
-            return EvaluationReport(
-                session_id=session_id,
-                commits=commits,
-                reviews=reviews,
-                evaluations=evaluations,
-                analysis=analysis
-            )
-            
-        except Exception as e:
-            await self._handle_evaluation_error(e)
-            raise
-    
-    async def _execute_phase1_commit_collection(self) -> List[CommitInfo]:
-        """Phase 1: 프롬프트 기반 커밋 수집 및 배점"""
-        self.current_phase = "commit_collection"
-        
-        # 프롬프트로 정의된 전략에 따라 도구 사용
-        commits = []
-        for repo in self.config.target_repositories:
-            # git_log 도구 사용
-            raw_commits = await self.tools["git_log"].execute(
-                repo_path=repo.path,
-                **self.config.commit_filters
-            )
-            
-            # commit_scoring 도구로 배점 계산
-            scored_commits = []
-            for commit in raw_commits.data:
-                score_result = await self.tools["commit_scoring"].execute(
-                    commit_hash=commit["hash"],
-                    repo_path=repo.path
-                )
-                if score_result.success and score_result.data["score"].total >= 60:
-                    scored_commits.append(score_result.data)
-            
-            # 상위 점수 커밋 선별
-            commits.extend(
-                sorted(scored_commits, key=lambda x: x["score"].total, reverse=True)
-                [:self.config.commits_per_repo]
-            )
-        
-        return commits
-    
-    async def _execute_phase2_review_execution(self, commits: List[CommitInfo]) -> List[ReviewResult]:
-        """Phase 2: 프롬프트 기반 리뷰 실행"""
-        self.current_phase = "review_execution"
-        
-        reviews = []
-        for commit in commits:
-            for model in self.config.review_models:
-                # selvage_executor 도구 사용
-                review_result = await self.tools["selvage_executor"].execute(
-                    repo_path=commit["repo_path"],
-                    commit_hash=commit["commit_hash"],
-                    model=model
-                )
+            if next_action == "COMPLETE":
+                break
                 
-                if review_result.success:
-                    reviews.append({
-                        "commit": commit,
-                        "model": model,
-                        "result": review_result.data
-                    })
-        
-        return reviews
-    
-    async def _execute_phase3_deepeval_conversion(self, reviews: List[ReviewResult]) -> List[EvaluationResult]:
-        """Phase 3: 프롬프트 기반 DeepEval 변환 및 평가"""
-        self.current_phase = "deepeval_conversion"
-        
-        # review_log_scanner 도구로 로그 파일 스캔
-        scan_result = await self.tools["review_log_scanner"].execute()
-        
-        evaluations = []
-        for log_entry in scan_result.data:
-            # deepeval_converter 도구로 형식 변환
-            conversion_result = await self.tools["deepeval_converter"].execute(
-                log_file=log_entry["file_path"],
-                metadata=log_entry["metadata"]
-            )
+            # 행동 실행
+            action_result = await self._execute_action(next_action, current_state)
             
-            if conversion_result.success:
-                # metric_evaluator 도구로 평가 실행
-                eval_result = await self.tools["metric_evaluator"].execute(
-                    test_cases=conversion_result.data
-                )
-                evaluations.append(eval_result.data)
+            # 결과 저장 및 상태 업데이트
+            await self._update_state(action_result)
         
-        return evaluations
+        # 최종 보고서 생성
+        return await self._generate_final_report(session_id)
     
-    async def _execute_phase4_analysis(self, evaluations: List[EvaluationResult]) -> AnalysisReport:
-        """Phase 4: 프롬프트 기반 통계 분석 및 인사이트 도출 (복잡한 추론 필요)"""
-        self.current_phase = "analysis"
+    async def _analyze_current_state(self) -> Dict[str, Any]:
+        """
+        현재 상태를 분석하여 어떤 단계까지 완료되었는지 파악
+        """
+        state = {
+            "session_id": self.session_state.session_id,
+            "completed_phases": [],
+            "available_data": {},
+            "next_required_phase": None
+        }
         
-        # 이 단계만 진짜 에이전트 수준의 복잡한 추론 필요
-        # statistical_analysis 도구로 기본 통계 계산
-        stats_result = await self.tools["statistical_analysis"].execute(
-            evaluation_results=evaluations,
-            analysis_type="comprehensive"
-        )
+        # Phase 1: 커밋 수집 상태 확인
+        commits_file = f"{self.config.output_dir}/meaningful_commits.json"
+        if await self.tools["file_exists"].execute(file_path=commits_file):
+            state["completed_phases"].append("commit_collection")
+            commit_data = await self.tools["read_file"].execute(
+                file_path=commits_file, as_json=True
+            )
+            state["available_data"]["commits"] = commit_data.data["content"]
         
-        # AI 추론을 통한 패턴 분석 및 인사이트 도출
-        insights = await self._analyze_patterns_with_reasoning(
-            stats_result.data,
-            evaluations
-        )
+        # Phase 2: 리뷰 실행 상태 확인
+        review_logs_exist = await self._check_review_logs_exist()
+        if review_logs_exist:
+            state["completed_phases"].append("review_execution")
+            state["available_data"]["reviews"] = await self._scan_review_logs()
         
-        # 실행 가능한 권장사항 생성
-        recommendations = await self._generate_actionable_recommendations(
-            insights,
-            stats_result.data
-        )
+        # Phase 3: DeepEval 결과 확인
+        eval_results_exist = await self._check_evaluation_results_exist()
+        if eval_results_exist:
+            state["completed_phases"].append("deepeval_conversion")
+            state["available_data"]["evaluations"] = await self._load_evaluation_results()
         
-        return AnalysisReport(
-            statistics=stats_result.data,
-            insights=insights,
-            recommendations=recommendations,
-            executive_summary=await self._create_executive_summary(insights, recommendations)
-        )
-```
+        # 다음 필요한 단계 결정
+        if "commit_collection" not in state["completed_phases"]:
+            state["next_required_phase"] = "commit_collection"
+        elif "review_execution" not in state["completed_phases"]:
+            state["next_required_phase"] = "review_execution"
+        elif "deepeval_conversion" not in state["completed_phases"]:
+            state["next_required_phase"] = "deepeval_conversion"
+        elif "analysis" not in state["completed_phases"]:
+            state["next_required_phase"] = "analysis"
+        else:
+            state["next_required_phase"] = "complete"
+        
+        return state
+    
+    async def _decide_next_action(self, current_state: Dict[str, Any]) -> str:
+        """
+        현재 상태를 기반으로 다음 행동을 결정
+        """
+        next_phase = current_state["next_required_phase"]
+        
+        if next_phase == "complete":
+            return "COMPLETE"
+        
+        # skip 로직 확인
+        if self.config.workflow.skip_existing:
+            if next_phase == "commit_collection" and current_state["available_data"].get("commits"):
+                return "SKIP_TO_REVIEW"
+            elif next_phase == "review_execution" and current_state["available_data"].get("reviews"):
+                return "SKIP_TO_EVALUATION"
+            elif next_phase == "deepeval_conversion" and current_state["available_data"].get("evaluations"):
+                return "SKIP_TO_ANALYSIS"
+        
+        return f"EXECUTE_{next_phase.upper()}"
+    
+    async def _execute_action(self, action: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        결정된 행동을 실행
+        
+        구체적인 Phase별 구현은 다음 문서들을 참조:
+        - Phase 1-2: docs/specs/02-commit-collection-and-review-execution.md
+        - Phase 3-4: docs/specs/03-evaluation-conversion-and-analysis.md
+        """
+        if action == "EXECUTE_COMMIT_COLLECTION":
+            # Phase 1 구현은 02-commit-collection-and-review-execution.md 참조
+            return await self._execute_phase1_commit_collection()
+        elif action == "EXECUTE_REVIEW_EXECUTION":
+            commits = current_state["available_data"]["commits"]
+            # Phase 2 구현은 02-commit-collection-and-review-execution.md 참조
+            return await self._execute_phase2_review_execution(commits)
+        elif action == "EXECUTE_DEEPEVAL_CONVERSION":
+            reviews = current_state["available_data"]["reviews"]
+            # Phase 3 구현은 03-evaluation-conversion-and-analysis.md 참조
+            return await self._execute_phase3_deepeval_conversion(reviews)
+        elif action == "EXECUTE_ANALYSIS":
+            evaluations = current_state["available_data"]["evaluations"]
+            # Phase 4 구현은 03-evaluation-conversion-and-analysis.md 참조
+            return await self._execute_phase4_analysis(evaluations)
+        elif action.startswith("SKIP_TO_"):
+            # 스킵 액션 처리
+            return {"action": action, "skipped": True}
+        else:
+            raise ValueError(f"Unknown action: {action}")
+    
+    # Phase별 구체적인 구현 메서드들은 해당 문서에서 구현:
+    # - Phase 1-2: docs/specs/02-commit-collection-and-review-execution.md
+    # - Phase 3-4: docs/specs/03-evaluation-conversion-and-analysis.md
 
 ## Tool 정의 및 분류
 
