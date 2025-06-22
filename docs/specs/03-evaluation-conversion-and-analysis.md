@@ -1030,6 +1030,713 @@ def compare_models(results: Dict[str, List[EvaluationResult]]) -> ComparisonRepo
     return report
 ```
 
+## Phase 3-4 Tool 구현
+
+### Phase 3 Tools: DeepEval Conversion
+
+#### ReviewLogScannerTool - 리뷰 로그 스캔
+```python
+class ReviewLogScannerTool(Tool):
+    """리뷰 로그 파일 스캔 및 메타데이터 추출"""
+    
+    @property
+    def name(self) -> str:
+        return "review_log_scanner"
+    
+    @property
+    def description(self) -> str:
+        return "리뷰 로그 디렉토리를 스캔하여 모든 리뷰 로그 파일을 찾고 메타데이터를 추출합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "base_path": {
+                    "type": "string", 
+                    "description": "리뷰 로그 기본 경로",
+                    "default": "~/Library/selvage-eval-agent/review_logs"
+                }
+            }
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        base_path = kwargs.get("base_path", "~/Library/selvage-eval-agent/review_logs")
+        
+        review_logs = []
+        base_path = Path(base_path).expanduser()
+        
+        try:
+            if not base_path.exists():
+                return ToolResult(
+                    success=False,
+                    error_message=f"경로가 존재하지 않습니다: {base_path}"
+                )
+            
+            # 디렉토리 구조 탐색: repo_name/commit_id/model_name/*.json
+            for repo_dir in base_path.iterdir():
+                if not repo_dir.is_dir():
+                    continue
+                    
+                for commit_dir in repo_dir.iterdir():
+                    if not commit_dir.is_dir():
+                        continue
+                        
+                    for model_dir in commit_dir.iterdir():
+                        if not model_dir.is_dir():
+                            continue
+                            
+                        for log_file in model_dir.glob("*.json"):
+                            metadata = await self._extract_log_metadata(log_file)
+                            review_logs.append({
+                                "repo_name": repo_dir.name,
+                                "commit_id": commit_dir.name,
+                                "model_name": model_dir.name,
+                                "file_path": str(log_file),
+                                "file_name": log_file.name,
+                                "metadata": metadata
+                            })
+            
+            return ToolResult(
+                success=True, 
+                data={
+                    "review_logs": review_logs,
+                    "total_count": len(review_logs),
+                    "scan_path": str(base_path)
+                }
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to scan review logs: {str(e)}"
+            )
+    
+    async def _extract_log_metadata(self, log_file: Path) -> Dict[str, Any]:
+        """리뷰 로그 파일에서 메타데이터 추출"""
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
+            
+            return {
+                "log_id": log_data.get("id"),
+                "model": log_data.get("model", {}),
+                "created_at": log_data.get("created_at"),
+                "status": log_data.get("status", "UNKNOWN"),
+                "prompt_version": log_data.get("prompt_version"),
+                "file_size": log_file.stat().st_size,
+                "has_prompt": bool(log_data.get("prompt")),
+                "has_response": bool(log_data.get("review_response"))
+            }
+        except Exception as e:
+            return {"error": str(e)}
+```
+
+#### DeepEvalConverterTool - DeepEval 형식 변환
+```python
+class DeepEvalConverterTool(Tool):
+    """리뷰 로그를 DeepEval 테스트 케이스로 변환"""
+    
+    @property
+    def name(self) -> str:
+        return "deepeval_converter"
+    
+    @property
+    def description(self) -> str:
+        return "리뷰 로그 데이터를 DeepEval 테스트 케이스 형식으로 변환합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "review_logs": {
+                    "type": "array",
+                    "description": "변환할 리뷰 로그 정보 리스트"
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "출력 디렉토리",
+                    "default": "~/Library/selvage-eval-agent/deep_eval_test_case"
+                },
+                "group_by": {
+                    "type": "string",
+                    "description": "그룹화 기준 (repo_model, repo, model)",
+                    "default": "repo_model"
+                }
+            },
+            "required": ["review_logs"]
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        review_logs = kwargs["review_logs"]
+        output_dir = kwargs.get("output_dir", "~/Library/selvage-eval-agent/deep_eval_test_case")
+        group_by = kwargs.get("group_by", "repo_model")
+        
+        try:
+            output_path = Path(output_dir).expanduser()
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # 그룹별로 테스트 케이스 생성
+            grouped_logs = self._group_logs(review_logs, group_by)
+            converted_files = []
+            
+            for group_key, logs in grouped_logs.items():
+                test_cases = []
+                for log_info in logs:
+                    test_case = await self._convert_single_log(log_info)
+                    if test_case:
+                        test_cases.append(test_case)
+                
+                if test_cases:
+                    file_path = await self._save_test_cases(
+                        group_key, test_cases, output_path
+                    )
+                    converted_files.append({
+                        "group": group_key,
+                        "file_path": file_path,
+                        "test_case_count": len(test_cases)
+                    })
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "converted_files": converted_files,
+                    "total_test_cases": sum(f["test_case_count"] for f in converted_files),
+                    "output_directory": str(output_path)
+                }
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to convert logs: {str(e)}"
+            )
+    
+    def _group_logs(self, review_logs: List[Dict], group_by: str) -> Dict[str, List[Dict]]:
+        """로그를 그룹별로 분류"""
+        grouped = {}
+        
+        for log in review_logs:
+            if group_by == "repo_model":
+                key = f"{log['repo_name']}_{log['model_name']}"
+            elif group_by == "repo":
+                key = log['repo_name']
+            elif group_by == "model":
+                key = log['model_name']
+            else:
+                key = "all"
+            
+            if key not in grouped:
+                grouped[key] = []
+            grouped[key].append(log)
+        
+        return grouped
+    
+    async def _convert_single_log(self, log_info: Dict) -> Optional[Dict[str, Any]]:
+        """단일 로그를 DeepEval 테스트 케이스로 변환"""
+        try:
+            with open(log_info["file_path"], 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
+            
+            prompt = log_data.get("prompt", [])
+            review_response = log_data.get("review_response", {})
+            
+            if not prompt or not review_response:
+                return None
+            
+            return {
+                "input": json.dumps(prompt, ensure_ascii=False),
+                "actual_output": json.dumps(review_response, ensure_ascii=False),
+                "expected_output": None,  # 현재 사용하지 않음
+                "metadata": {
+                    "repo_name": log_info["repo_name"],
+                    "commit_id": log_info["commit_id"],
+                    "model_name": log_info["model_name"],
+                    "log_id": log_data.get("id"),
+                    "created_at": log_data.get("created_at")
+                }
+            }
+        except Exception as e:
+            print(f"Failed to convert log {log_info['file_path']}: {e}")
+            return None
+    
+    async def _save_test_cases(self, group_key: str, test_cases: List[Dict], 
+                              output_path: Path) -> str:
+        """테스트 케이스를 파일로 저장"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"test_data_{timestamp}_{group_key}.json"
+        file_path = output_path / filename
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(test_cases, f, ensure_ascii=False, indent=2)
+        
+        return str(file_path)
+```
+
+#### MetricEvaluatorTool - 메트릭 평가 실행
+```python
+class MetricEvaluatorTool(Tool):
+    """DeepEval 메트릭을 사용한 평가 실행"""
+    
+    @property
+    def name(self) -> str:
+        return "metric_evaluator"
+    
+    @property
+    def description(self) -> str:
+        return "DeepEval 메트릭을 사용하여 테스트 케이스를 평가합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "test_case_files": {
+                    "type": "array",
+                    "description": "평가할 테스트 케이스 파일 목록"
+                },
+                "metrics": {
+                    "type": "array",
+                    "description": "사용할 메트릭 목록",
+                    "default": ["correctness", "clarity", "actionability", "json_correctness"]
+                },
+                "judge_model": {
+                    "type": "string",
+                    "description": "평가에 사용할 judge 모델",
+                    "default": "gpt-4"
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "결과 저장 디렉토리",
+                    "default": "~/Library/selvage-eval-agent/evaluation_results"
+                }
+            },
+            "required": ["test_case_files"]
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        test_case_files = kwargs["test_case_files"]
+        metrics = kwargs.get("metrics", ["correctness", "clarity", "actionability", "json_correctness"])
+        judge_model = kwargs.get("judge_model", "gpt-4")
+        output_dir = kwargs.get("output_dir", "~/Library/selvage-eval-agent/evaluation_results")
+        
+        try:
+            output_path = Path(output_dir).expanduser()
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            evaluation_results = []
+            
+            for file_info in test_case_files:
+                file_path = file_info["file_path"]
+                group = file_info["group"]
+                
+                # 테스트 케이스 로드
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    test_cases = json.load(f)
+                
+                # DeepEval 평가 실행
+                results = await self._run_deepeval_evaluation(
+                    test_cases, metrics, judge_model
+                )
+                
+                # 결과 저장
+                result_file = await self._save_evaluation_results(
+                    group, results, output_path
+                )
+                
+                evaluation_results.append({
+                    "group": group,
+                    "test_case_file": file_path,
+                    "result_file": result_file,
+                    "test_case_count": len(test_cases),
+                    "evaluation_count": len(results)
+                })
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "evaluation_results": evaluation_results,
+                    "total_evaluations": sum(r["evaluation_count"] for r in evaluation_results),
+                    "output_directory": str(output_path)
+                }
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to evaluate metrics: {str(e)}"
+            )
+    
+    async def _run_deepeval_evaluation(self, test_cases: List[Dict], 
+                                     metrics: List[str], judge_model: str) -> List[Dict]:
+        """DeepEval을 사용한 실제 평가 실행"""
+        from deepeval.metrics import (
+            AnswerRelevancyMetric, 
+            FaithfulnessMetric,
+            HallucinationMetric,
+            G_Eval
+        )
+        from deepeval.test_case import LLMTestCase
+        
+        # 메트릭 인스턴스 생성
+        metric_instances = {}
+        
+        if "correctness" in metrics:
+            metric_instances["correctness"] = G_Eval(
+                name="Correctness",
+                criteria="코드 리뷰의 정확성을 평가합니다",
+                evaluation_params=[
+                    "이슈 식별의 정확성",
+                    "제안 사항의 적절성",
+                    "코드 이해도"
+                ],
+                model=judge_model
+            )
+        
+        if "clarity" in metrics:
+            metric_instances["clarity"] = G_Eval(
+                name="Clarity",
+                criteria="리뷰 내용의 명확성을 평가합니다",
+                evaluation_params=[
+                    "설명의 이해하기 쉬움",
+                    "구체적인 예시 제공",
+                    "전문 용어 사용의 적절성"
+                ],
+                model=judge_model
+            )
+        
+        if "actionability" in metrics:
+            metric_instances["actionability"] = G_Eval(
+                name="Actionability",
+                criteria="리뷰의 실행 가능성을 평가합니다",
+                evaluation_params=[
+                    "구체적인 해결 방안 제시",
+                    "실제 적용 가능성",
+                    "우선순위의 명확성"
+                ],
+                model=judge_model
+            )
+        
+        if "json_correctness" in metrics:
+            metric_instances["json_correctness"] = G_Eval(
+                name="JsonCorrectness",
+                criteria="JSON 형식의 정확성을 평가합니다",
+                evaluation_params=[
+                    "JSON 구조의 유효성",
+                    "필수 필드 포함 여부",
+                    "데이터 타입의 일관성"
+                ],
+                model=judge_model
+            )
+        
+        results = []
+        
+        for i, test_case in enumerate(test_cases):
+            try:
+                # DeepEval 테스트 케이스 생성
+                llm_test_case = LLMTestCase(
+                    input=test_case["input"],
+                    actual_output=test_case["actual_output"],
+                    expected_output=test_case.get("expected_output")
+                )
+                
+                # 각 메트릭별 평가
+                case_results = {
+                    "test_case_index": i,
+                    "metadata": test_case.get("metadata", {}),
+                    "scores": {}
+                }
+                
+                for metric_name, metric_instance in metric_instances.items():
+                    try:
+                        metric_instance.measure(llm_test_case)
+                        case_results["scores"][metric_name] = {
+                            "score": metric_instance.score,
+                            "reason": getattr(metric_instance, 'reason', None),
+                            "success": metric_instance.success
+                        }
+                    except Exception as e:
+                        case_results["scores"][metric_name] = {
+                            "score": 0.0,
+                            "reason": f"Evaluation failed: {str(e)}",
+                            "success": False
+                        }
+                
+                results.append(case_results)
+                
+            except Exception as e:
+                results.append({
+                    "test_case_index": i,
+                    "metadata": test_case.get("metadata", {}),
+                    "scores": {},
+                    "error": str(e)
+                })
+        
+        return results
+    
+    async def _save_evaluation_results(self, group: str, results: List[Dict], 
+                                     output_path: Path) -> str:
+        """평가 결과를 파일로 저장"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"evaluation_results_{timestamp}_{group}.json"
+        file_path = output_path / filename
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        
+        return str(file_path)
+```
+
+### Phase 4 Tools: Analysis and Visualization
+
+#### StatisticalAnalysisTool - 통계 분석
+```python
+class StatisticalAnalysisTool(Tool):
+    """DeepEval 결과 통계 분석"""
+    
+    @property
+    def name(self) -> str:
+        return "statistical_analysis"
+    
+    @property
+    def description(self) -> str:
+        return "평가 결과를 통계적으로 분석하여 인사이트를 도출합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "evaluation_files": {
+                    "type": "array",
+                    "description": "분석할 평가 결과 파일 목록"
+                },
+                "analysis_type": {
+                    "type": "string",
+                    "description": "분석 유형",
+                    "enum": ["comprehensive", "model_comparison", "failure_pattern", "repo_analysis"],
+                    "default": "comprehensive"
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "결과 저장 디렉토리",
+                    "default": "~/Library/selvage-eval-agent/analysis_results"
+                },
+                "generate_visualizations": {
+                    "type": "boolean",
+                    "description": "시각화 생성 여부",
+                    "default": True
+                }
+            },
+            "required": ["evaluation_files"]
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        evaluation_files = kwargs["evaluation_files"]
+        analysis_type = kwargs.get("analysis_type", "comprehensive")
+        output_dir = kwargs.get("output_dir", "~/Library/selvage-eval-agent/analysis_results")
+        generate_visualizations = kwargs.get("generate_visualizations", True)
+        
+        try:
+            output_path = Path(output_dir).expanduser()
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # 평가 결과 로드 및 통합
+            all_results = []
+            for file_info in evaluation_files:
+                with open(file_info["result_file"], 'r', encoding='utf-8') as f:
+                    results = json.load(f)
+                    for result in results:
+                        result["group"] = file_info["group"]
+                    all_results.extend(results)
+            
+            # 분석 실행
+            if analysis_type == "comprehensive":
+                analysis = await self._comprehensive_analysis(all_results)
+            elif analysis_type == "model_comparison":
+                analysis = await self._model_comparison_analysis(all_results)
+            elif analysis_type == "failure_pattern":
+                analysis = await self._failure_pattern_analysis(all_results)
+            elif analysis_type == "repo_analysis":
+                analysis = await self._repo_analysis(all_results)
+            
+            # 결과 저장
+            analysis_file = await self._save_analysis_results(
+                analysis_type, analysis, output_path
+            )
+            
+            # 시각화 생성
+            visualization_files = []
+            if generate_visualizations:
+                visualization_files = await self._generate_visualizations(
+                    analysis, output_path
+                )
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "analysis_file": analysis_file,
+                    "visualization_files": visualization_files,
+                    "analysis_type": analysis_type,
+                    "total_test_cases": len(all_results),
+                    "output_directory": str(output_path)
+                }
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Statistical analysis failed: {str(e)}"
+            )
+    
+    async def _comprehensive_analysis(self, results: List[Dict]) -> Dict[str, Any]:
+        """종합 통계 분석"""
+        import numpy as np
+        
+        metrics_stats = {}
+        all_metrics = ["correctness", "clarity", "actionability", "json_correctness"]
+        
+        for metric in all_metrics:
+            scores = self._extract_metric_scores(results, metric)
+            
+            if scores:
+                metrics_stats[metric] = {
+                    "count": len(scores),
+                    "mean": float(np.mean(scores)),
+                    "median": float(np.median(scores)),
+                    "std": float(np.std(scores)),
+                    "min": float(np.min(scores)),
+                    "max": float(np.max(scores)),
+                    "q25": float(np.percentile(scores, 25)),
+                    "q75": float(np.percentile(scores, 75)),
+                    "pass_rate": len([s for s in scores if s >= 0.7]) / len(scores)
+                }
+            else:
+                metrics_stats[metric] = {"error": "No valid scores found"}
+        
+        return {
+            "analysis_type": "comprehensive",
+            "timestamp": datetime.now().isoformat(),
+            "metrics_statistics": metrics_stats,
+            "overall_performance": self._calculate_overall_performance(metrics_stats),
+            "recommendations": self._generate_recommendations(metrics_stats),
+            "data_summary": {
+                "total_test_cases": len(results),
+                "successful_evaluations": len([r for r in results if not r.get("error")]),
+                "failed_evaluations": len([r for r in results if r.get("error")])
+            }
+        }
+    
+    def _extract_metric_scores(self, results: List[Dict], metric: str) -> List[float]:
+        """메트릭별 점수 추출"""
+        scores = []
+        for result in results:
+            if "scores" in result and metric in result["scores"]:
+                score_data = result["scores"][metric]
+                if score_data.get("success", False) and isinstance(score_data.get("score"), (int, float)):
+                    scores.append(float(score_data["score"]))
+        return scores
+    
+    def _calculate_overall_performance(self, metrics_stats: Dict) -> Dict[str, Any]:
+        """전체 성능 계산"""
+        valid_metrics = {k: v for k, v in metrics_stats.items() if "error" not in v}
+        
+        if not valid_metrics:
+            return {"error": "No valid metrics for overall performance calculation"}
+        
+        overall_mean = sum(m["mean"] for m in valid_metrics.values()) / len(valid_metrics)
+        overall_pass_rate = sum(m["pass_rate"] for m in valid_metrics.values()) / len(valid_metrics)
+        
+        return {
+            "weighted_score": overall_mean,
+            "overall_pass_rate": overall_pass_rate,
+            "consistency": 1.0 - (sum(m["std"] for m in valid_metrics.values()) / len(valid_metrics)),
+            "grade": self._assign_grade(overall_mean)
+        }
+    
+    def _assign_grade(self, score: float) -> str:
+        """점수에 따른 등급 할당"""
+        if score >= 0.9:
+            return "A"
+        elif score >= 0.8:
+            return "B"
+        elif score >= 0.7:
+            return "C"
+        elif score >= 0.6:
+            return "D"
+        else:
+            return "F"
+    
+    def _generate_recommendations(self, metrics_stats: Dict) -> List[str]:
+        """개선 권장사항 생성"""
+        recommendations = []
+        
+        for metric, stats in metrics_stats.items():
+            if "error" in stats:
+                continue
+                
+            if stats["mean"] < 0.7:
+                recommendations.append(f"{metric} 개선이 필요합니다 (현재 평균: {stats['mean']:.3f})")
+            
+            if stats["std"] > 0.2:
+                recommendations.append(f"{metric}의 일관성 향상이 필요합니다 (표준편차: {stats['std']:.3f})")
+        
+        return recommendations
+    
+    async def _save_analysis_results(self, analysis_type: str, analysis: Dict, 
+                                   output_path: Path) -> str:
+        """분석 결과 저장"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"analysis_{analysis_type}_{timestamp}.json"
+        file_path = output_path / filename
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(analysis, f, ensure_ascii=False, indent=2)
+        
+        return str(file_path)
+    
+    async def _generate_visualizations(self, analysis: Dict, output_path: Path) -> List[str]:
+        """시각화 생성"""
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        
+        visualization_files = []
+        
+        try:
+            # 메트릭별 성능 바차트
+            metrics_stats = analysis.get("metrics_statistics", {})
+            if metrics_stats:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                
+                metrics = list(metrics_stats.keys())
+                means = [stats.get("mean", 0) for stats in metrics_stats.values()]
+                
+                bars = ax.bar(metrics, means)
+                ax.set_ylabel('평균 점수')
+                ax.set_title('메트릭별 평균 성능')
+                ax.set_ylim(0, 1)
+                
+                # 점수에 따른 색상 설정
+                for bar, mean in zip(bars, means):
+                    if mean >= 0.8:
+                        bar.set_color('green')
+                    elif mean >= 0.7:
+                        bar.set_color('yellow')
+                    else:
+                        bar.set_color('red')
+                
+                chart_path = output_path / "metrics_performance_chart.png"
+                plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+                visualization_files.append(str(chart_path))
+                plt.close()
+            
+        except Exception as e:
+            print(f"Failed to generate visualizations: {e}")
+        
+        return visualization_files
+```
+
 ## 구현 체크리스트
 
 ### Phase 3: 평가 시스템
