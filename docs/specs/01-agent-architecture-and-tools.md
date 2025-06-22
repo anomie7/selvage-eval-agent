@@ -17,104 +17,184 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 자동화 에이전트
 - **PEP 8 준수**
 - **비동기 처리** (다중 모델 병렬 평가)
 
-## AI 에이전트 아키텍처 패러다임
+## Single Agent 아키텍처 패러다임
 
 ### ReAct (Reasoning + Acting) 패턴
-Selvage 평가 에이전트는 ReAct 패턴을 기반으로 설계되어 추론과 행동을 반복적으로 수행합니다.
+Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 4단계 워크플로우를 순차 실행합니다.
 
 ```python
 class SelvageEvaluationAgent:
     """
-    ReAct 패턴을 구현한 Selvage 평가 에이전트
+    단일 에이전트로 전체 평가 프로세스를 관리하는 Selvage 평가 에이전트
     """
     
-    def __init__(self, model: str, tools: Dict[str, Tool]):
-        self.model = model
-        self.tools = tools
+    def __init__(self, config: EvaluationConfig):
+        self.config = config
+        self.tools = self._initialize_tools()
         self.working_memory = WorkingMemory()
         self.session_state = SessionState()
+        self.current_phase = None
     
-    async def execute_phase(self, phase: str, context: Dict[str, Any]) -> PhaseResult:
+    async def execute_full_evaluation(self) -> EvaluationReport:
         """
-        단계별 실행: 추론 → 계획 → 도구 선택 → 실행 → 평가
+        전체 4단계 평가 프로세스 실행
         """
-        # 1. Reasoning: 현재 상황 분석 및 목표 설정
-        analysis = await self.analyze_situation(phase, context)
+        session_id = self._generate_session_id()
         
-        # 2. Planning: 도구 실행 계획 수립
-        execution_plan = await self.create_execution_plan(analysis)
-        
-        # 3. Acting: 계획에 따른 도구 실행
-        results = await self.execute_tools(execution_plan)
-        
-        # 4. Evaluation: 결과 평가 및 다음 단계 결정
-        evaluation = await self.evaluate_results(results, analysis.goals)
-        
-        return PhaseResult(
-            phase=phase,
-            analysis=analysis,
-            plan=execution_plan,
-            results=results,
-            evaluation=evaluation
-        )
-```
-
-### Multi-Agent Coordination
-복잡한 4단계 워크플로우를 위한 전문화된 서브 에이전트들:
-
-```python
-class AgentOrchestrator:
-    """
-    다중 에이전트 조정 및 관리
-    """
+        try:
+            # Phase 1: Commit Collection - 의미있는 커밋 수집
+            commits = await self._execute_phase1_commit_collection()
+            
+            # Phase 2: Review Execution - Selvage 리뷰 실행
+            reviews = await self._execute_phase2_review_execution(commits)
+            
+            # Phase 3: DeepEval Conversion - 평가 형식 변환 및 실행
+            evaluations = await self._execute_phase3_deepeval_conversion(reviews)
+            
+            # Phase 4: Analysis - 결과 분석 및 인사이트 도출
+            analysis = await self._execute_phase4_analysis(evaluations)
+            
+            return EvaluationReport(
+                session_id=session_id,
+                commits=commits,
+                reviews=reviews,
+                evaluations=evaluations,
+                analysis=analysis
+            )
+            
+        except Exception as e:
+            await self._handle_evaluation_error(e)
+            raise
     
-    def __init__(self):
-        self.commit_collector_agent = CommitCollectorAgent()
-        self.review_executor_agent = ReviewExecutorAgent() 
-        self.evaluation_agent = EvaluationAgent()
-        self.analysis_agent = AnalysisAgent()
+    async def _execute_phase1_commit_collection(self) -> List[CommitInfo]:
+        """Phase 1: 프롬프트 기반 커밋 수집 및 배점"""
+        self.current_phase = "commit_collection"
+        
+        # 프롬프트로 정의된 전략에 따라 도구 사용
+        commits = []
+        for repo in self.config.target_repositories:
+            # git_log 도구 사용
+            raw_commits = await self.tools["git_log"].execute(
+                repo_path=repo.path,
+                **self.config.commit_filters
+            )
+            
+            # commit_scoring 도구로 배점 계산
+            scored_commits = []
+            for commit in raw_commits.data:
+                score_result = await self.tools["commit_scoring"].execute(
+                    commit_hash=commit["hash"],
+                    repo_path=repo.path
+                )
+                if score_result.success and score_result.data["score"].total >= 60:
+                    scored_commits.append(score_result.data)
+            
+            # 상위 점수 커밋 선별
+            commits.extend(
+                sorted(scored_commits, key=lambda x: x["score"].total, reverse=True)
+                [:self.config.commits_per_repo]
+            )
+        
+        return commits
     
-    async def execute_full_evaluation(self, config: EvaluationConfig) -> EvaluationReport:
-        """
-        전체 평가 프로세스 실행
-        """
-        # Phase 1: Commit Collection
-        commits = await self.commit_collector_agent.collect_meaningful_commits(
-            repositories=config.target_repositories,
-            filters=config.commit_filters
+    async def _execute_phase2_review_execution(self, commits: List[CommitInfo]) -> List[ReviewResult]:
+        """Phase 2: 프롬프트 기반 리뷰 실행"""
+        self.current_phase = "review_execution"
+        
+        reviews = []
+        for commit in commits:
+            for model in self.config.review_models:
+                # selvage_executor 도구 사용
+                review_result = await self.tools["selvage_executor"].execute(
+                    repo_path=commit["repo_path"],
+                    commit_hash=commit["commit_hash"],
+                    model=model
+                )
+                
+                if review_result.success:
+                    reviews.append({
+                        "commit": commit,
+                        "model": model,
+                        "result": review_result.data
+                    })
+        
+        return reviews
+    
+    async def _execute_phase3_deepeval_conversion(self, reviews: List[ReviewResult]) -> List[EvaluationResult]:
+        """Phase 3: 프롬프트 기반 DeepEval 변환 및 평가"""
+        self.current_phase = "deepeval_conversion"
+        
+        # review_log_scanner 도구로 로그 파일 스캔
+        scan_result = await self.tools["review_log_scanner"].execute()
+        
+        evaluations = []
+        for log_entry in scan_result.data:
+            # deepeval_converter 도구로 형식 변환
+            conversion_result = await self.tools["deepeval_converter"].execute(
+                log_file=log_entry["file_path"],
+                metadata=log_entry["metadata"]
+            )
+            
+            if conversion_result.success:
+                # metric_evaluator 도구로 평가 실행
+                eval_result = await self.tools["metric_evaluator"].execute(
+                    test_cases=conversion_result.data
+                )
+                evaluations.append(eval_result.data)
+        
+        return evaluations
+    
+    async def _execute_phase4_analysis(self, evaluations: List[EvaluationResult]) -> AnalysisReport:
+        """Phase 4: 프롬프트 기반 통계 분석 및 인사이트 도출 (복잡한 추론 필요)"""
+        self.current_phase = "analysis"
+        
+        # 이 단계만 진짜 에이전트 수준의 복잡한 추론 필요
+        # statistical_analysis 도구로 기본 통계 계산
+        stats_result = await self.tools["statistical_analysis"].execute(
+            evaluation_results=evaluations,
+            analysis_type="comprehensive"
         )
         
-        # Phase 2: Review Execution  
-        reviews = await self.review_executor_agent.execute_reviews(
-            commits=commits,
-            models=config.review_models
+        # AI 추론을 통한 패턴 분석 및 인사이트 도출
+        insights = await self._analyze_patterns_with_reasoning(
+            stats_result.data,
+            evaluations
         )
         
-        # Phase 3: Evaluation
-        evaluations = await self.evaluation_agent.convert_and_evaluate(
-            reviews=reviews,
-            metrics=config.evaluation_metrics
+        # 실행 가능한 권장사항 생성
+        recommendations = await self._generate_actionable_recommendations(
+            insights,
+            stats_result.data
         )
         
-        # Phase 4: Analysis
-        analysis = await self.analysis_agent.analyze_results(
-            evaluations=evaluations,
-            generate_insights=True
-        )
-        
-        return EvaluationReport(
-            session_id=generate_session_id(),
-            commits=commits,
-            reviews=reviews, 
-            evaluations=evaluations,
-            analysis=analysis
+        return AnalysisReport(
+            statistics=stats_result.data,
+            insights=insights,
+            recommendations=recommendations,
+            executive_summary=await self._create_executive_summary(insights, recommendations)
         )
 ```
 
 ## Tool 정의 및 분류
 
-### Tool Interface 정의
-모든 도구는 표준화된 인터페이스를 구현합니다:
+### Tool 분류 및 Interface 정의
+
+도구는 크게 **기본 유틸리티 도구**와 **Phase별 전용 도구**로 분류됩니다:
+
+#### 기본 유틸리티 도구 (모든 Phase에서 공통 사용)
+- `execute_terminal`: 터미널 명령어 실행 (git, selvage, 파일 작업 등)
+- `read_file`: 파일 내용 읽기 (JSON, 로그, 설정 파일 등)
+- `write_file`: 파일 쓰기 (결과 저장, 임시 파일 생성 등)
+- `list_directory`: 디렉토리 내용 조회
+- `file_exists`: 파일/디렉토리 존재 확인
+
+#### Phase별 전용 도구
+- **Phase 1**: `git_log`, `commit_scoring`
+- **Phase 2**: `selvage_executor`
+- **Phase 3**: `review_log_scanner`, `deepeval_converter`, `metric_evaluator`
+- **Phase 4**: `statistical_analysis`
+
+모든 도구는 단일 에이전트가 사용하는 유틸리티로서 표준화된 인터페이스를 구현합니다:
 
 ```python
 from abc import ABC, abstractmethod
@@ -162,6 +242,242 @@ class Tool(ABC):
         """매개변수 유효성 검증"""
         # JSON Schema 기반 검증 구현
         pass
+```
+
+### 기본 유틸리티 도구 구현
+
+**ExecuteTerminalTool** - 터미널 명령어 실행
+```python
+class ExecuteTerminalTool(Tool):
+    """터미널 명령어 실행 도구 (모든 Phase에서 사용)"""
+    
+    @property
+    def name(self) -> str:
+        return "execute_terminal"
+    
+    @property
+    def description(self) -> str:
+        return "터미널 명령어를 실행하고 결과를 반환합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string", 
+                    "description": "실행할 터미널 명령어"
+                },
+                "cwd": {
+                    "type": "string", 
+                    "description": "명령어 실행 디렉토리 (선택사항)"
+                },
+                "timeout": {
+                    "type": "integer", 
+                    "description": "타임아웃 (초, 기본값: 60)"
+                },
+                "capture_output": {
+                    "type": "boolean", 
+                    "description": "출력 캡처 여부 (기본값: true)"
+                }
+            },
+            "required": ["command"]
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        command = kwargs["command"]
+        cwd = kwargs.get("cwd", None)
+        timeout = kwargs.get("timeout", 60)
+        capture_output = kwargs.get("capture_output", True)
+        
+        try:
+            # 보안을 위한 명령어 검증
+            if self._is_dangerous_command(command):
+                return ToolResult(
+                    success=False,
+                    error_message=f"Dangerous command blocked: {command}"
+                )
+            
+            # 명령어 실행
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE if capture_output else None,
+                stderr=asyncio.subprocess.PIPE if capture_output else None
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), 
+                timeout=timeout
+            )
+            
+            return ToolResult(
+                success=process.returncode == 0,
+                data={
+                    "returncode": process.returncode,
+                    "stdout": stdout.decode() if stdout else "",
+                    "stderr": stderr.decode() if stderr else "",
+                    "command": command
+                },
+                error_message=stderr.decode() if process.returncode != 0 and stderr else None
+            )
+            
+        except asyncio.TimeoutError:
+            return ToolResult(
+                success=False,
+                error_message=f"Command timed out after {timeout} seconds"
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to execute command: {str(e)}"
+            )
+    
+    def _is_dangerous_command(self, command: str) -> bool:
+        """위험한 명령어 검증"""
+        dangerous_commands = ["rm -rf", "format", "del /s", "shutdown", "reboot"]
+        return any(danger in command.lower() for danger in dangerous_commands)
+```
+
+**ReadFileTool** - 파일 읽기
+```python
+class ReadFileTool(Tool):
+    """파일 내용 읽기 도구 (모든 Phase에서 사용)"""
+    
+    @property
+    def name(self) -> str:
+        return "read_file"
+    
+    @property
+    def description(self) -> str:
+        return "지정된 파일의 내용을 읽어서 반환합니다"
+    
+    @property
+    def parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string", 
+                    "description": "읽을 파일의 경로"
+                },
+                "encoding": {
+                    "type": "string", 
+                    "description": "파일 인코딩 (기본값: utf-8)"
+                },
+                "max_size_mb": {
+                    "type": "integer", 
+                    "description": "최대 파일 크기 (MB, 기본값: 10)"
+                },
+                "as_json": {
+                    "type": "boolean", 
+                    "description": "JSON으로 파싱 여부 (기본값: false)"
+                }
+            },
+            "required": ["file_path"]
+        }
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        file_path = kwargs["file_path"]
+        encoding = kwargs.get("encoding", "utf-8")
+        max_size_mb = kwargs.get("max_size_mb", 10)
+        as_json = kwargs.get("as_json", False)
+        
+        try:
+            # 파일 존재 확인
+            if not os.path.exists(file_path):
+                return ToolResult(
+                    success=False,
+                    error_message=f"File not found: {file_path}"
+                )
+            
+            # 파일 크기 확인
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            if file_size_mb > max_size_mb:
+                return ToolResult(
+                    success=False,
+                    error_message=f"File too large: {file_size_mb:.1f}MB > {max_size_mb}MB"
+                )
+            
+            # 파일 읽기
+            with open(file_path, 'r', encoding=encoding) as f:
+                content = f.read()
+            
+            # JSON 파싱 (필요시)
+            if as_json:
+                try:
+                    content = json.loads(content)
+                except json.JSONDecodeError as e:
+                    return ToolResult(
+                        success=False,
+                        error_message=f"Invalid JSON format: {str(e)}"
+                    )
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "content": content,
+                    "file_path": file_path,
+                    "file_size_bytes": os.path.getsize(file_path),
+                    "encoding": encoding
+                }
+            )
+            
+        except UnicodeDecodeError:
+            return ToolResult(
+                success=False,
+                error_message=f"Unable to decode file with encoding: {encoding}"
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to read file: {str(e)}"
+            )
+```
+
+**WriteFileTool** - 파일 쓰기
+```python
+class WriteFileTool(Tool):
+    """파일 쓰기 도구 (결과 저장용)"""
+    
+    @property
+    def name(self) -> str:
+        return "write_file"
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        file_path = kwargs["file_path"]
+        content = kwargs["content"]
+        encoding = kwargs.get("encoding", "utf-8")
+        create_dirs = kwargs.get("create_dirs", True)
+        as_json = kwargs.get("as_json", False)
+        
+        try:
+            # 디렉토리 생성 (필요시)
+            if create_dirs:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            # JSON 직렬화 (필요시)
+            if as_json:
+                content = json.dumps(content, indent=2, ensure_ascii=False)
+            
+            # 파일 쓰기
+            with open(file_path, 'w', encoding=encoding) as f:
+                f.write(content)
+            
+            return ToolResult(
+                success=True,
+                data={
+                    "file_path": file_path,
+                    "bytes_written": len(content.encode(encoding)),
+                    "encoding": encoding
+                }
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error_message=f"Failed to write file: {str(e)}"
+            )
 ```
 
 ### Phase 1 Tools: Commit Collection
@@ -498,30 +814,53 @@ class StatisticalAnalysisTool(Tool):
         }
 ```
 
-## 에이전트 프롬프트 설계
+## 단일 에이전트 프롬프트 설계
 
-### Master Orchestrator Prompt
+### Master Agent Prompt
 ```python
-MASTER_ORCHESTRATOR_PROMPT = """
+SINGLE_AGENT_PROMPT = """
 # ROLE
 당신은 Selvage 코드 리뷰 도구를 평가하는 전문 AI 에이전트입니다.
-4단계 워크플로우를 통해 체계적이고 정량적인 평가를 수행합니다.
+단일 에이전트로서 4단계 워크플로우를 순차적으로 실행하여 체계적이고 정량적인 평가를 수행합니다.
 
 # CAPABILITIES
 - 다양한 도구를 사용하여 Git 저장소 분석, 코드 리뷰 실행, 결과 평가 수행
 - 통계적 분석을 통한 모델 성능 비교 및 인사이트 도출
 - 재현 가능한 평가 환경 구축 및 결과 문서화
 
-# WORKFLOW
-1. **Commit Collection**: meaningful한 커밋들을 자동 식별 및 배점
-2. **Review Execution**: 다중 모델로 Selvage 리뷰 병렬 실행
-3. **DeepEval Conversion**: 리뷰 결과를 DeepEval 형식으로 변환 및 평가
-4. **Analysis & Insights**: 통계 분석을 통한 actionable insights 도출
+# WORKFLOW PHASES
+당신은 다음 4단계를 순차적으로 실행합니다:
+
+1. **Phase 1 - Commit Collection**: 
+   - 목적: meaningful한 커밋들을 자동 식별 및 배점
+   - 사용 도구: git_log, commit_scoring
+   - 결과: 평가 가치가 높은 커밋 리스트
+
+2. **Phase 2 - Review Execution**: 
+   - 목적: 선별된 커밋에 대해 다중 모델로 Selvage 리뷰 실행
+   - 사용 도구: selvage_executor
+   - 결과: 모델별 리뷰 결과 로그
+
+3. **Phase 3 - DeepEval Conversion**: 
+   - 목적: 리뷰 결과를 DeepEval 형식으로 변환 및 평가
+   - 사용 도구: review_log_scanner, deepeval_converter, metric_evaluator
+   - 결과: 정량화된 평가 메트릭
+
+4. **Phase 4 - Analysis & Insights**: 
+   - 목적: 통계 분석을 통한 actionable insights 도출 (복잡한 추론 필요)
+   - 사용 도구: statistical_analysis + AI 추론
+   - 결과: 실행 가능한 권장사항 및 인사이트
+
+# PHASE EXECUTION STRATEGY
+- Phase 1-3: 주로 도구 호출과 데이터 처리 중심
+- Phase 4: AI 추론을 통한 패턴 분석 및 인사이트 도출
+- 각 단계의 결과는 다음 단계의 입력으로 사용
+- 실패 시 재시도 로직 내장
 
 # DECISION MAKING PRINCIPLES
 - **데이터 기반**: 모든 결정은 정량적 데이터에 근거
 - **재현성**: 동일 조건에서 동일 결과 보장
-- **효율성**: 병렬 처리 및 캐싱을 통한 성능 최적화
+- **효율성**: 적절한 도구 선택 및 캐싱 활용
 - **신뢰성**: 에러 처리 및 복구 메커니즘 내장
 
 # ERROR HANDLING
@@ -538,237 +877,195 @@ MASTER_ORCHESTRATOR_PROMPT = """
 """
 ```
 
-### Phase-Specific Prompts
+### Phase-Specific Context (프롬프트에 포함될 단계별 컨텍스트)
 
-**Phase 1: Commit Collection Prompt**
+단일 에이전트가 현재 실행 중인 Phase를 이해할 수 있도록 각 단계별 세부 컨텍스트를 제공합니다:
+
+**Phase 1 Context: Commit Collection**
 ```python
-COMMIT_COLLECTION_PROMPT = """
-# MISSION
-지정된 저장소들에서 평가 가치가 높은 의미있는 커밋들을 식별하고 선별하세요.
+PHASE1_CONTEXT = """
+현재 단계: Phase 1 - Commit Collection
 
-# STRATEGY
-1. **키워드 기반 1차 필터링**: fix, feature, refactor 등 포함, typo, format 등 제외
-2. **통계 기반 2차 필터링**: 파일 수 2-10개, 변경 라인 50+ 기준
-3. **배점 기반 최종 선별**: 파일 타입, 변경 규모, 커밋 특성, 시간 등 종합 고려
+목적: 평가 가치가 높은 의미있는 커밋들을 식별하고 선별
 
-# TOOLS AVAILABLE
-- git_log: 커밋 로그 조회
-- git_show: 커밋 상세 정보
-- commit_scoring: 커밋 배점 계산
-- json_writer: 결과 저장
+전략:
+1. 키워드 기반 1차 필터링 (fix, feature, refactor 포함 / typo, format 제외)
+2. 통계 기반 2차 필터링 (파일 수 2-10개, 변경 라인 50+ 기준)
+3. 배점 기반 최종 선별 (파일 타입, 변경 규모, 커밋 특성 종합 고려)
 
-# EXECUTION STEPS
-1. 각 저장소별로 git_log 실행하여 후보 커밋 수집
-2. commit_scoring으로 각 커밋의 평가 가치 배점
-3. commits_per_repo 설정에 따라 상위 점수 커밋 선별
-4. meaningful_commits.json 형식으로 결과 저장
+사용할 도구: git_log, commit_scoring
+예상 결과: commits_per_repo 개수만큼 선별된 고품질 커밋 리스트
 
-# SUCCESS CRITERIA
-- 기술스택별로 적절한 커밋 다양성 확보
-- 평가에 적합한 코드 변경 규모와 복잡도
-- 재현 가능한 결과 저장 형식
+실행 단계:
+1. 각 저장소별 git_log로 후보 커밋 수집
+2. commit_scoring으로 평가 가치 배점
+3. 상위 점수 커밋 선별
+"""
+
+PHASE2_CONTEXT = """
+현재 단계: Phase 2 - Review Execution
+
+목적: 선별된 커밋들에 대해 다중 모델로 Selvage 리뷰 실행
+
+전략:
+1. 안전한 커밋 체크아웃 (실행 후 HEAD 복원)
+2. 모델별 순차 실행 (동시성 제한)
+3. 체계적 결과 저장 (repo/commit/model 구조)
+
+사용할 도구: selvage_executor
+예상 결과: 모델별 리뷰 결과 로그 파일들
+
+실행 단계:
+1. Phase 1 결과에서 커밋 목록 로드
+2. 각 커밋별로 모델별 리뷰 실행
+3. 결과 검증 및 구조화된 저장
+"""
+
+PHASE3_CONTEXT = """
+현재 단계: Phase 3 - DeepEval Conversion
+
+목적: 리뷰 결과를 DeepEval 테스트 케이스로 변환 및 평가
+
+전략:
+1. 리뷰 로그 파일 전체 스캔
+2. prompt/response 데이터 추출
+3. DeepEval 형식 변환
+4. 4개 메트릭으로 평가 실행
+
+사용할 도구: review_log_scanner, deepeval_converter, metric_evaluator
+평가 메트릭: Correctness, Clarity, Actionability, JsonCorrectness
+예상 결과: 정량화된 평가 점수 데이터
+
+실행 단계:
+1. 저장된 리뷰 로그 스캔
+2. 데이터 추출 및 형식 변환
+3. DeepEval 평가 실행
+"""
+
+PHASE4_CONTEXT = """
+현재 단계: Phase 4 - Analysis & Insights (복잡한 추론 단계)
+
+목적: 평가 결과 종합 분석 및 actionable insights 도출
+
+전략:
+1. 통계적 분석으로 기본 패턴 파악
+2. AI 추론을 통한 깊이 있는 패턴 분석
+3. 실행 가능한 권장사항 생성
+4. 의사결정 지원 인사이트 도출
+
+사용할 도구: statistical_analysis + AI 추론 능력
+분석 차원: 모델별 성능, 기술스택별 특화, 실패 패턴, 비용 효율성
+예상 결과: Executive Summary, 상세 성능 매트릭스, 개선 권장사항
+
+주의: 이 단계는 단순한 도구 호출이 아닌 복잡한 추론과 인사이트 도출이 필요
 """
 ```
 
-**Phase 2: Review Execution Prompt**
+## 단일 에이전트의 Tool 실행 전략
+
+### Phase-Sequential Tool Execution
+단일 에이전트가 각 Phase 내에서 도구들을 순차적으로 실행하는 전략:
+
 ```python
-REVIEW_EXECUTION_PROMPT = """
-# MISSION  
-선별된 커밋들에 대해 다중 모델로 Selvage 코드 리뷰를 병렬 실행하세요.
-
-# STRATEGY
-1. **안전한 커밋 체크아웃**: 각 커밋으로 이동 후 리뷰 실행, 완료 후 HEAD 복원
-2. **모델별 병렬 실행**: review_models 설정에 따른 동시 실행
-3. **결과 체계적 저장**: repo/commit/model 구조로 로그 분리 저장
-
-# TOOLS AVAILABLE
-- git_checkout: 커밋 체크아웃
-- selvage_executor: Selvage 리뷰 실행
-- process_monitor: 실행 상태 모니터링
-- log_parser: 결과 파싱
-
-# EXECUTION STEPS
-1. meaningful_commits.json에서 커밋 목록 로드
-2. 각 커밋별로 모델별 병렬 리뷰 실행
-3. 실행 결과 검증 및 에러 처리
-4. 구조화된 디렉토리에 결과 저장
-
-# ERROR HANDLING
-- Selvage 실행 실패 시 최대 3회 재시도
-- 타임아웃 설정 및 무한 대기 방지
-- 부분 실패 시에도 성공한 결과는 보존
-"""
-```
-
-**Phase 3: DeepEval Conversion Prompt**
-```python
-DEEPEVAL_CONVERSION_PROMPT = """
-# MISSION
-Selvage 리뷰 결과를 DeepEval 테스트 케이스로 변환하고 4개 메트릭으로 평가하세요.
-
-# STRATEGY
-1. **리뷰 로그 스캔**: 저장된 모든 리뷰 결과 파일 탐색
-2. **데이터 추출**: prompt와 review_response 필드 추출
-3. **형식 변환**: DeepEval TestCase 형식으로 변환
-4. **메트릭 평가**: Correctness, Clarity, Actionability, JsonCorrectness
-
-# TOOLS AVAILABLE
-- review_log_scanner: 리뷰 로그 파일 스캔
-- data_extractor: prompt/response 추출
-- deepeval_converter: 형식 변환
-- metric_evaluator: 평가 실행
-
-# EVALUATION METRICS
-- **Correctness (0.7)**: 이슈 탐지 정확성 및 적절성
-- **Clarity (0.7)**: 설명의 명확성 및 이해도
-- **Actionability (0.7)**: 제안의 실행 가능성
-- **JsonCorrectness**: 스키마 준수도
-
-# OUTPUT FORMAT
-repo_name과 model_name별로 그룹화하여 테스트 케이스 저장
-"""
-```
-
-**Phase 4: Analysis Prompt** 
-```python
-ANALYSIS_PROMPT = """
-# MISSION
-DeepEval 평가 결과를 종합 분석하여 실제 의사결정에 도움이 되는 인사이트를 도출하세요.
-
-# STRATEGY
-1. **통계적 분석**: 메트릭별 성능 분포 및 유의성 검정
-2. **모델 비교**: 기술스택별 최적 모델 조합 식별
-3. **실패 패턴 분석**: 개선 방향 도출
-4. **비용 최적화**: 성능 대비 비용 효율성 분석
-
-# TOOLS AVAILABLE
-- statistical_analysis: 통계 분석
-- visualization: 차트 생성
-- report_generator: 보고서 작성
-- insight_extractor: 인사이트 도출
-
-# ANALYSIS DIMENSIONS
-- 모델별 종합 성능 비교
-- 기술스택별 특화 성능 분석
-- 실패 사유별 개선 우선순위
-- 프롬프트 버전 효과성 A/B 테스트
-
-# DELIVERABLES
-1. Executive Summary (핵심 발견사항 및 권장사항)
-2. Detailed Performance Matrix (모델별 상세 성능)
-3. Actionable Insights (구체적 개선 방향)
-4. Cost Optimization Recommendations (비용 효율화 방안)
-"""
-```
-
-## Tool 실행 전략
-
-### Sequential vs Parallel Execution
-```python
-class ToolExecutionStrategy:
-    """도구 실행 전략 관리"""
+class SingleAgentToolExecutor:
+    """단일 에이전트의 도구 실행 관리"""
     
-    def __init__(self, max_concurrent: int = 5):
-        self.max_concurrent = max_concurrent
-        self.semaphore = asyncio.Semaphore(max_concurrent)
+    def __init__(self, agent: SelvageEvaluationAgent):
+        self.agent = agent
+        self.retry_count = 3
+        self.timeout_seconds = 300
     
-    async def execute_sequential(self, tools: List[Tool], contexts: List[Dict]) -> List[ToolResult]:
-        """순차 실행 (의존성이 있는 경우)"""
+    async def execute_phase_tools(self, phase: str, tool_sequence: List[Dict]) -> List[ToolResult]:
+        """Phase 내 도구들을 순차 실행"""
         results = []
-        for tool, context in zip(tools, contexts):
-            result = await tool.execute(**context)
+        
+        for tool_config in tool_sequence:
+            tool_name = tool_config["name"]
+            tool_params = tool_config["params"]
+            
+            # 재시도 로직 포함 도구 실행
+            result = await self._execute_with_retry(
+                tool_name=tool_name,
+                params=tool_params,
+                max_retries=self.retry_count
+            )
+            
             results.append(result)
             
-            # 실패 시 중단 여부 결정
-            if not result.success and context.get("stop_on_failure", True):
-                break
-                
+            # 중요한 도구 실패 시 Phase 중단
+            if not result.success and tool_config.get("critical", False):
+                raise PhaseExecutionError(f"Critical tool {tool_name} failed in {phase}")
+        
         return results
     
-    async def execute_parallel(self, tools: List[Tool], contexts: List[Dict]) -> List[ToolResult]:
-        """병렬 실행 (독립적인 경우)"""
-        async def execute_with_semaphore(tool: Tool, context: Dict) -> ToolResult:
-            async with self.semaphore:
-                return await tool.execute(**context)
+    async def _execute_with_retry(self, tool_name: str, params: Dict, max_retries: int) -> ToolResult:
+        """재시도 로직이 포함된 도구 실행"""
+        last_error = None
         
-        tasks = [
-            execute_with_semaphore(tool, context)
-            for tool, context in zip(tools, contexts)
-        ]
-        
-        return await asyncio.gather(*tasks, return_exceptions=True)
-    
-    async def execute_pipeline(self, pipeline: ToolPipeline) -> PipelineResult:
-        """파이프라인 실행 (출력이 다음 입력으로 연결)"""
-        current_data = pipeline.initial_data
-        results = []
-        
-        for stage in pipeline.stages:
-            # 이전 단계 결과를 현재 단계 입력으로 변환
-            stage_input = pipeline.transform_data(current_data, stage.input_mapping)
+        for attempt in range(max_retries + 1):
+            try:
+                tool = self.agent.tools[tool_name]
+                result = await asyncio.wait_for(
+                    tool.execute(**params),
+                    timeout=self.timeout_seconds
+                )
+                
+                if result.success:
+                    return result
+                    
+                last_error = result.error_message
+                
+            except asyncio.TimeoutError:
+                last_error = f"Tool {tool_name} timed out after {self.timeout_seconds}s"
+            except Exception as e:
+                last_error = str(e)
             
-            # 단계 실행
-            if stage.parallel:
-                stage_results = await self.execute_parallel(stage.tools, stage_input)
-            else:
-                stage_results = await self.execute_sequential(stage.tools, stage_input)
-            
-            results.append(stage_results)
-            current_data = pipeline.extract_output(stage_results)
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)  # 지수 백오프
         
-        return PipelineResult(
-            stages=results,
-            final_output=current_data,
-            success=all(r.success for stage in results for r in stage if hasattr(r, 'success'))
+        return ToolResult(
+            success=False,
+            data=None,
+            error_message=f"Failed after {max_retries} retries: {last_error}"
         )
 ```
 
-### Tool Dependency Management
+### Phase Transition Management
+Phase 간 데이터 전달 및 상태 관리:
+
 ```python
-class ToolDependencyGraph:
-    """도구 간 의존성 관리"""
+class PhaseTransitionManager:
+    """Phase 간 전환 및 데이터 전달 관리"""
     
     def __init__(self):
-        self.dependencies = {}  # tool_name -> [prerequisite_tools]
-        self.results_cache = {}
+        self.phase_results = {}
+        self.transition_rules = {
+            "commit_collection": "review_execution",
+            "review_execution": "deepeval_conversion", 
+            "deepeval_conversion": "analysis",
+            "analysis": None  # 마지막 단계
+        }
     
-    def add_dependency(self, tool: str, prerequisites: List[str]):
-        """의존성 추가"""
-        self.dependencies[tool] = prerequisites
+    def store_phase_result(self, phase: str, result: Any):
+        """Phase 결과 저장"""
+        self.phase_results[phase] = result
     
-    def get_execution_order(self) -> List[List[str]]:
-        """위상 정렬을 통한 실행 순서 결정"""
-        # Kahn's algorithm 구현
-        in_degree = {tool: 0 for tool in self.dependencies}
-        
-        for tool, deps in self.dependencies.items():
-            for dep in deps:
-                in_degree[tool] += 1
-        
-        # 실행 레벨별 그룹화
-        execution_levels = []
-        remaining = set(self.dependencies.keys())
-        
-        while remaining:
-            # 의존성이 없는 도구들 (현재 레벨)
-            current_level = [
-                tool for tool in remaining 
-                if in_degree[tool] == 0
-            ]
-            
-            if not current_level:
-                raise ValueError("Circular dependency detected")
-            
-            execution_levels.append(current_level)
-            
-            # 다음 레벨 준비
-            for tool in current_level:
-                remaining.remove(tool)
-                for dependent in self.dependencies:
-                    if tool in self.dependencies[dependent]:
-                        in_degree[dependent] -= 1
-        
-        return execution_levels
+    def get_input_for_phase(self, phase: str) -> Dict[str, Any]:
+        """다음 Phase의 입력 데이터 준비"""
+        if phase == "commit_collection":
+            return {}  # 첫 단계는 설정에서 입력
+        elif phase == "review_execution":
+            return {"commits": self.phase_results["commit_collection"]}
+        elif phase == "deepeval_conversion":
+            return {"reviews": self.phase_results["review_execution"]}
+        elif phase == "analysis":
+            return {"evaluations": self.phase_results["deepeval_conversion"]}
+        else:
+            raise ValueError(f"Unknown phase: {phase}")
+    
+    def get_next_phase(self, current_phase: str) -> Optional[str]:
+        """다음 실행할 Phase 반환"""
+        return self.transition_rules.get(current_phase)
 ```
 
 ## 상태 관리 및 메모리
