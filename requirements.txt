@@ -1,0 +1,32 @@
+# Selvage 평가 에이전트 의존성
+
+# LLM 평가 프레임워크
+deepeval>=0.21.0
+
+# 테스트 프레임워크  
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# 비동기 처리
+aiofiles>=23.0.0
+
+# 설정 관리
+pyyaml>=6.0.0
+pydantic>=2.0.0
+
+# 로깅 및 유틸리티
+structlog>=23.0.0
+
+# API 클라이언트들 (평가용)
+openai>=1.0.0
+anthropic>=0.7.0
+google-generativeai>=0.3.0
+
+# 데이터 처리
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 개발 도구
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.5.0

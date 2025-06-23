@@ -1,0 +1,522 @@
+"""Selvage 평가 에이전트 핵심 클래스
+
+단일 에이전트로 전체 평가 프로세스를 관리하는 Selvage 평가 에이전트입니다.
+대화형 모드와 자동 실행 모드를 모두 지원합니다.
+"""
+
+import json
+import asyncio
+from typing import Dict, List, Any, Optional
+import logging
+
+from ..config.settings import EvaluationConfig
+from ..tools.base import Tool, ToolResult, ExecutionPlan
+from ..tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
+from ..tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
+from ..memory.working_memory import WorkingMemory, get_working_memory
+from ..memory.session_state import SessionState
+
+logger = logging.getLogger(__name__)
+
+
+class SelvageEvaluationAgent:
+    """
+    단일 에이전트로 전체 평가 프로세스를 관리하는 Selvage 평가 에이전트
+    대화형 모드와 자동 실행 모드를 모두 지원
+    """
+    
+    def __init__(self, config: EvaluationConfig):
+        """에이전트 초기화
+        
+        Args:
+            config: 평가 설정
+        """
+        self.config = config
+        self.tools = self._initialize_tools()
+        self.working_memory = get_working_memory()
+        self.session_state: Optional[SessionState] = None
+        self.current_phase: Optional[str] = None
+        self.is_interactive_mode = False
+        
+        logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model}")
+    
+    def _initialize_tools(self) -> Dict[str, Tool]:
+        """도구들 초기화
+        
+        Returns:
+            도구 이름과 인스턴스 매핑 딕셔너리
+        """
+        tools = {
+            "read_file": ReadFileTool(),
+            "write_file": WriteFileTool(),
+            "file_exists": FileExistsTool(),
+            "execute_safe_command": ExecuteSafeCommandTool(),
+            "list_directory": ListDirectoryTool(),
+        }
+        
+        logger.debug(f"Initialized {len(tools)} tools")
+        return tools
+    
+    async def start_session(self, session_id: Optional[str] = None) -> str:
+        """새 평가 세션 시작
+        
+        Args:
+            session_id: 세션 ID (None이면 자동 생성)
+            
+        Returns:
+            생성된 세션 ID
+        """
+        self.session_state = SessionState(session_id)
+        
+        # 세션 메타데이터 저장
+        await self._save_session_metadata()
+        
+        # 자동 영속화 시작
+        await self.session_state.auto_persist(self.config.evaluation.output_dir)
+        
+        logger.info(f"Started evaluation session: {self.session_state.session_id}")
+        return self.session_state.session_id
+    
+    async def handle_user_message(self, message: str) -> str:
+        """
+        현대적 에이전트 패턴으로 사용자 메시지 처리
+        
+        Flow:
+        1. LLM이 쿼리 분석 및 실행 계획 수립
+        2. 계획에 따라 도구들 실행  
+        3. 도구 결과를 바탕으로 LLM이 최종 응답 생성
+        
+        Args:
+            message: 사용자 메시지
+            
+        Returns:
+            처리 결과 응답
+        """
+        if not self.session_state:
+            await self.start_session()
+        
+        self.is_interactive_mode = True
+        
+        try:
+            # 1. LLM 기반 쿼리 분석 및 실행 계획 수립
+            plan = await self.plan_execution(message)
+            
+            # 2. 안전성 검증
+            if not self._validate_plan_safety(plan):
+                return f"요청하신 작업은 보안상 실행할 수 없습니다: {plan.safety_check}"
+            
+            # 3. 계획에 따라 도구들 실행
+            tool_results = []
+            for tool_call in plan.tool_calls:
+                result = await self.execute_tool(tool_call.tool, tool_call.params)
+                tool_results.append({
+                    "tool": tool_call.tool,
+                    "result": result,
+                    "rationale": tool_call.rationale
+                })
+            
+            # 4. 도구 결과를 바탕으로 최종 응답 생성
+            return await self.generate_response(message, plan, tool_results)
+            
+        except Exception as e:
+            logger.error(f"Error handling user message: {e}")
+            return f"메시지 처리 중 오류가 발생했습니다: {str(e)}"
+    
+    async def plan_execution(self, user_query: str) -> ExecutionPlan:
+        """LLM을 통한 쿼리 분석 및 실행 계획 수립
+        
+        Args:
+            user_query: 사용자 쿼리
+            
+        Returns:
+            실행 계획
+        """
+        # 현재 상태 정보 수집
+        current_state = await self._analyze_current_state()
+        
+        # TODO: 실제 LLM 호출 구현
+        # 지금은 간단한 규칙 기반 계획 수립
+        plan = self._create_simple_plan(user_query, current_state)
+        
+        logger.debug(f"Created execution plan for query: {user_query[:50]}...")
+        return plan
+    
+    def _create_simple_plan(self, user_query: str, current_state: Dict[str, Any]) -> ExecutionPlan:
+        """간단한 규칙 기반 실행 계획 생성 (임시 구현)
+        
+        Args:
+            user_query: 사용자 쿼리
+            current_state: 현재 상태
+            
+        Returns:
+            실행 계획
+        """
+        from ..tools.base import ToolCall
+        
+        query_lower = user_query.lower()
+        
+        # 상태 조회 쿼리
+        if any(keyword in query_lower for keyword in ["상태", "현재", "진행"]):
+            return ExecutionPlan(
+                intent_summary="현재 상태 조회",
+                confidence=0.9,
+                parameters={},
+                tool_calls=[
+                    ToolCall(
+                        tool="read_file",
+                        params={"file_path": f"{self.config.evaluation.output_dir}/session_metadata.json", "as_json": True},
+                        rationale="세션 메타데이터 읽기"
+                    )
+                ],
+                safety_check="읽기 전용 작업으로 안전",
+                expected_outcome="현재 세션 상태 정보"
+            )
+        
+        # 커밋 목록 조회
+        elif any(keyword in query_lower for keyword in ["커밋", "commit"]):
+            return ExecutionPlan(
+                intent_summary="커밋 목록 조회",
+                confidence=0.8,
+                parameters={},
+                tool_calls=[
+                    ToolCall(
+                        tool="read_file",
+                        params={"file_path": f"{self.config.evaluation.output_dir}/meaningful_commits.json", "as_json": True},
+                        rationale="선별된 커밋 목록 읽기"
+                    )
+                ],
+                safety_check="읽기 전용 작업으로 안전",
+                expected_outcome="선별된 커밋 목록"
+            )
+        
+        # 기본 디렉토리 조회
+        else:
+            return ExecutionPlan(
+                intent_summary="출력 디렉토리 조회",
+                confidence=0.5,
+                parameters={},
+                tool_calls=[
+                    ToolCall(
+                        tool="list_directory",
+                        params={"directory_path": self.config.evaluation.output_dir},
+                        rationale="출력 디렉토리 내용 확인"
+                    )
+                ],
+                safety_check="읽기 전용 작업으로 안전",
+                expected_outcome="출력 디렉토리 파일 목록"
+            )
+    
+    async def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
+        """도구 실행 결과를 바탕으로 사용자에게 제공할 최종 응답 생성
+        
+        Args:
+            user_query: 사용자 쿼리
+            plan: 실행 계획
+            tool_results: 도구 실행 결과
+            
+        Returns:
+            사용자 응답
+        """
+        # TODO: 실제 LLM 기반 응답 생성 구현
+        # 지금은 간단한 텍스트 응답
+        
+        if not tool_results:
+            return "실행된 도구가 없습니다."
+        
+        response_parts = [f"**{plan.intent_summary}**\n"]
+        
+        for result in tool_results:
+            tool_name = result["tool"]
+            tool_result = result["result"]
+            
+            if tool_result.success:
+                if tool_name == "read_file":
+                    content = tool_result.data.get("content", {})
+                    if isinstance(content, dict):
+                        response_parts.append(f"📄 파일 내용 ({len(content)} 항목):")
+                        for key, value in list(content.items())[:3]:  # 처음 3개만 표시
+                            response_parts.append(f"  - {key}: {str(value)[:100]}...")
+                    else:
+                        response_parts.append(f"📄 파일 내용: {str(content)[:200]}...")
+                        
+                elif tool_name == "list_directory":
+                    files = tool_result.data.get("files", [])
+                    dirs = tool_result.data.get("directories", [])
+                    response_parts.append(f"📁 디렉토리 내용:")
+                    response_parts.append(f"  - 파일: {len(files)}개")
+                    response_parts.append(f"  - 디렉토리: {len(dirs)}개")
+                    if files:
+                        response_parts.append(f"  - 주요 파일: {', '.join(files[:5])}")
+                        
+                else:
+                    response_parts.append(f"✅ {tool_name} 실행 완료")
+            else:
+                response_parts.append(f"❌ {tool_name} 실행 실패: {tool_result.error_message}")
+        
+        return "\n".join(response_parts)
+    
+    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+        """도구 실행
+        
+        Args:
+            tool_name: 도구 이름
+            params: 도구 매개변수
+            
+        Returns:
+            도구 실행 결과
+        """
+        if tool_name not in self.tools:
+            return ToolResult(
+                success=False,
+                data=None,
+                error_message=f"Unknown tool: {tool_name}"
+            )
+        
+        tool = self.tools[tool_name]
+        try:
+            result = await tool.execute_with_timing(**params)
+            logger.debug(f"Executed tool {tool_name} in {result.execution_time:.2f}s")
+            return result
+        except Exception as e:
+            logger.error(f"Tool execution failed: {tool_name} - {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                error_message=str(e)
+            )
+    
+    def _validate_plan_safety(self, plan: ExecutionPlan) -> bool:
+        """실행 계획의 안전성 검증
+        
+        Args:
+            plan: 검증할 실행 계획
+            
+        Returns:
+            안전성 검증 결과
+        """
+        # 금지된 도구 확인
+        forbidden_tools = ["delete_file", "modify_repository", "system_command"]
+        for tool_call in plan.tool_calls:
+            if tool_call.tool in forbidden_tools:
+                return False
+        
+        # selvage-deprecated 쓰기 작업 확인
+        for tool_call in plan.tool_calls:
+            if "selvage-deprecated" in str(tool_call.params) and tool_call.tool.startswith("write"):
+                return False
+        
+        return True
+    
+    async def execute_evaluation(self) -> Dict[str, Any]:
+        """
+        에이전트 방식으로 평가 프로세스 실행
+        상태를 파악하고 동적으로 다음 행동 결정
+        
+        Returns:
+            평가 결과 딕셔너리
+        """
+        if not self.session_state:
+            await self.start_session()
+        
+        logger.info("Starting automatic evaluation execution")
+        
+        while True:
+            # 현재 상태 분석
+            current_state = await self._analyze_current_state()
+            
+            # 다음 행동 결정
+            next_action = await self._decide_next_action(current_state)
+            
+            if next_action == "COMPLETE":
+                break
+                
+            # 행동 실행
+            action_result = await self._execute_action(next_action, current_state)
+            
+            # 결과 저장 및 상태 업데이트
+            await self._update_state(action_result)
+        
+        # 최종 보고서 생성
+        return await self._generate_final_report()
+    
+    async def _analyze_current_state(self) -> Dict[str, Any]:
+        """
+        현재 상태를 분석하여 어떤 단계까지 완료되었는지 파악
+        
+        Returns:
+            현재 상태 딕셔너리
+        """
+        if not self.session_state:
+            return {"error": "No active session"}
+        
+        state = {
+            "session_id": self.session_state.session_id,
+            "completed_phases": [],
+            "available_data": {},
+            "next_required_phase": None
+        }
+        
+        # Phase 1: 커밋 수집 상태 확인
+        commits_file = self.config.get_output_path("meaningful_commits.json")
+        commits_exist = await self.execute_tool("file_exists", {"file_path": commits_file})
+        if commits_exist.success and commits_exist.data.get("exists"):
+            state["completed_phases"].append("commit_collection")
+            # TODO: 실제 커밋 데이터 로드
+        
+        # Phase 2: 리뷰 실행 상태 확인
+        review_logs_dir = self.config.get_output_path("review_logs")
+        review_logs_exist = await self.execute_tool("file_exists", {"file_path": review_logs_dir})
+        if review_logs_exist.success and review_logs_exist.data.get("exists"):
+            state["completed_phases"].append("review_execution")
+        
+        # Phase 3: DeepEval 결과 확인
+        eval_results_file = self.config.get_output_path("evaluations", "evaluation_results.json")
+        eval_results_exist = await self.execute_tool("file_exists", {"file_path": eval_results_file})
+        if eval_results_exist.success and eval_results_exist.data.get("exists"):
+            state["completed_phases"].append("deepeval_conversion")
+        
+        # 다음 필요한 단계 결정
+        if "commit_collection" not in state["completed_phases"]:
+            state["next_required_phase"] = "commit_collection"
+        elif "review_execution" not in state["completed_phases"]:
+            state["next_required_phase"] = "review_execution"
+        elif "deepeval_conversion" not in state["completed_phases"]:
+            state["next_required_phase"] = "deepeval_conversion"
+        elif "analysis" not in state["completed_phases"]:
+            state["next_required_phase"] = "analysis"
+        else:
+            state["next_required_phase"] = "complete"
+        
+        return state
+    
+    async def _decide_next_action(self, current_state: Dict[str, Any]) -> str:
+        """
+        현재 상태를 기반으로 다음 행동을 결정
+        
+        Args:
+            current_state: 현재 상태
+            
+        Returns:
+            다음 행동 문자열
+        """
+        next_phase = current_state["next_required_phase"]
+        
+        if next_phase == "complete":
+            return "COMPLETE"
+        
+        # skip 로직 확인
+        if self.config.workflow.skip_existing:
+            if next_phase == "commit_collection" and current_state["available_data"].get("commits"):
+                return "SKIP_TO_REVIEW"
+            elif next_phase == "review_execution" and current_state["available_data"].get("reviews"):
+                return "SKIP_TO_EVALUATION"
+            elif next_phase == "deepeval_conversion" and current_state["available_data"].get("evaluations"):
+                return "SKIP_TO_ANALYSIS"
+        
+        return f"EXECUTE_{next_phase.upper()}"
+    
+    async def _execute_action(self, action: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        결정된 행동을 실행
+        
+        Args:
+            action: 실행할 행동
+            current_state: 현재 상태
+            
+        Returns:
+            행동 실행 결과
+        """
+        logger.info(f"Executing action: {action}")
+        
+        # TODO: Phase별 구체적인 구현
+        if action == "EXECUTE_COMMIT_COLLECTION":
+            return await self._execute_phase1_commit_collection()
+        elif action == "EXECUTE_REVIEW_EXECUTION":
+            return await self._execute_phase2_review_execution(current_state)
+        elif action == "EXECUTE_DEEPEVAL_CONVERSION":
+            return await self._execute_phase3_deepeval_conversion(current_state)
+        elif action == "EXECUTE_ANALYSIS":
+            return await self._execute_phase4_analysis(current_state)
+        elif action.startswith("SKIP_TO_"):
+            return {"action": action, "skipped": True}
+        else:
+            raise ValueError(f"Unknown action: {action}")
+    
+    async def _execute_phase1_commit_collection(self) -> Dict[str, Any]:
+        """Phase 1: 커밋 수집 실행 (임시 구현)"""
+        logger.info("Executing Phase 1: Commit Collection")
+        # TODO: 실제 구현
+        return {"phase": "commit_collection", "status": "placeholder"}
+    
+    async def _execute_phase2_review_execution(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 2: 리뷰 실행 (임시 구현)"""
+        logger.info("Executing Phase 2: Review Execution")
+        # TODO: 실제 구현
+        return {"phase": "review_execution", "status": "placeholder"}
+    
+    async def _execute_phase3_deepeval_conversion(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 3: DeepEval 변환 (임시 구현)"""
+        logger.info("Executing Phase 3: DeepEval Conversion")
+        # TODO: 실제 구현
+        return {"phase": "deepeval_conversion", "status": "placeholder"}
+    
+    async def _execute_phase4_analysis(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 4: 분석 (임시 구현)"""
+        logger.info("Executing Phase 4: Analysis")
+        # TODO: 실제 구현
+        return {"phase": "analysis", "status": "placeholder"}
+    
+    async def _update_state(self, action_result: Dict[str, Any]) -> None:
+        """행동 실행 결과로 상태 업데이트
+        
+        Args:
+            action_result: 행동 실행 결과
+        """
+        if self.session_state and "phase" in action_result:
+            phase = action_result["phase"]
+            self.session_state.update_phase_state(phase, action_result)
+            
+            if action_result.get("status") == "completed":
+                self.session_state.mark_phase_completed(phase)
+    
+    async def _generate_final_report(self) -> Dict[str, Any]:
+        """최종 평가 보고서 생성
+        
+        Returns:
+            최종 보고서 딕셔너리
+        """
+        if not self.session_state:
+            return {"error": "No session state"}
+        
+        return {
+            "session_summary": self.session_state.get_session_summary(),
+            "completed_phases": self.session_state.get_completed_phases(),
+            "status": "completed"
+        }
+    
+    async def _save_session_metadata(self) -> None:
+        """세션 메타데이터 저장"""
+        if not self.session_state:
+            return
+        
+        metadata = {
+            "session_id": self.session_state.session_id,
+            "start_time": self.session_state.start_time.isoformat(),
+            "agent_model": self.config.agent_model,
+            "review_models": self.config.review_models,
+            "target_repositories": [repo.dict() for repo in self.config.target_repositories],
+            "configuration": {
+                "commits_per_repo": self.config.commits_per_repo,
+                "workflow": self.config.workflow.dict(),
+                "deepeval_metrics": [metric.dict() for metric in self.config.deepeval.metrics]
+            }
+        }
+        
+        metadata_file = self.config.get_output_path("session_metadata.json")
+        await self.execute_tool("write_file", {
+            "file_path": metadata_file,
+            "content": metadata,
+            "as_json": True
+        })
+        
+        logger.info(f"Saved session metadata: {metadata_file}")
