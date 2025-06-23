@@ -1099,7 +1099,7 @@ class ReviewLogScannerTool(Tool):
             }
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         base_path = kwargs.get("base_path", "~/Library/selvage-eval-agent/review_logs")
         
         review_logs = []
@@ -1126,7 +1126,7 @@ class ReviewLogScannerTool(Tool):
                             continue
                             
                         for log_file in model_dir.glob("*.json"):
-                            metadata = await self._extract_log_metadata(log_file)
+                            metadata = self._extract_log_metadata(log_file)
                             review_logs.append({
                                 "repo_name": repo_dir.name,
                                 "commit_id": commit_dir.name,
@@ -1151,7 +1151,7 @@ class ReviewLogScannerTool(Tool):
                 error_message=f"Failed to scan review logs: {str(e)}"
             )
     
-    async def _extract_log_metadata(self, log_file: Path) -> Dict[str, Any]:
+    def _extract_log_metadata(self, log_file: Path) -> Dict[str, Any]:
         """리뷰 로그 파일에서 메타데이터 추출"""
         try:
             with open(log_file, 'r', encoding='utf-8') as f:
@@ -1285,7 +1285,7 @@ class DeepEvalConverterTool(Tool):
             "required": ["review_logs"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         review_logs = kwargs["review_logs"]
         output_dir = kwargs.get("output_dir", "~/Library/selvage-eval-agent/deep_eval_test_case")
         group_by = kwargs.get("group_by", "repo_model")
@@ -1301,12 +1301,12 @@ class DeepEvalConverterTool(Tool):
             for group_key, logs in grouped_logs.items():
                 test_cases = []
                 for log_info in logs:
-                    test_case = await self._convert_single_log(log_info)
+                    test_case = self._convert_single_log(log_info)
                     if test_case:
                         test_cases.append(test_case)
                 
                 if test_cases:
-                    file_path = await self._save_test_cases(
+                    file_path = self._save_test_cases(
                         group_key, test_cases, output_path
                     )
                     converted_files.append({
@@ -1350,7 +1350,7 @@ class DeepEvalConverterTool(Tool):
         
         return grouped
     
-    async def _convert_single_log(self, log_info: Dict) -> Optional[Dict[str, Any]]:
+    def _convert_single_log(self, log_info: Dict) -> Optional[Dict[str, Any]]:
         """단일 로그를 DeepEval 테스트 케이스로 변환"""
         try:
             with open(log_info["file_path"], 'r', encoding='utf-8') as f:
@@ -1378,7 +1378,7 @@ class DeepEvalConverterTool(Tool):
             print(f"Failed to convert log {log_info['file_path']}: {e}")
             return None
     
-    async def _save_test_cases(self, group_key: str, test_cases: List[Dict], 
+    def _save_test_cases(self, group_key: str, test_cases: List[Dict], 
                               output_path: Path) -> str:
         """테스트 케이스를 파일로 저장"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1523,7 +1523,7 @@ class MetricEvaluatorTool(Tool):
             "required": ["test_case_files"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         test_case_files = kwargs["test_case_files"]
         metrics = kwargs.get("metrics", ["correctness", "clarity", "actionability", "json_correctness"])
         judge_model = kwargs.get("judge_model", "gpt-4")
@@ -1544,12 +1544,12 @@ class MetricEvaluatorTool(Tool):
                     test_cases = json.load(f)
                 
                 # DeepEval 평가 실행
-                results = await self._run_deepeval_evaluation(
+                results = self._run_deepeval_evaluation(
                     test_cases, metrics, judge_model
                 )
                 
                 # 결과 저장
-                result_file = await self._save_evaluation_results(
+                result_file = self._save_evaluation_results(
                     group, results, output_path
                 )
                 
@@ -1576,7 +1576,7 @@ class MetricEvaluatorTool(Tool):
                 error_message=f"Failed to evaluate metrics: {str(e)}"
             )
     
-    async def _run_deepeval_evaluation(self, test_cases: List[Dict], 
+    def _run_deepeval_evaluation(self, test_cases: List[Dict], 
                                      metrics: List[str], judge_model: str) -> List[Dict]:
         """DeepEval을 사용한 실제 평가 실행"""
         from deepeval.metrics import (
@@ -1683,7 +1683,7 @@ class MetricEvaluatorTool(Tool):
         
         return results
     
-    async def _save_evaluation_results(self, group: str, results: List[Dict], 
+    def _save_evaluation_results(self, group: str, results: List[Dict], 
                                      output_path: Path) -> str:
         """평가 결과를 파일로 저장"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1823,7 +1823,7 @@ class StatisticalAnalysisTool(Tool):
             "required": ["evaluation_files"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         evaluation_files = kwargs["evaluation_files"]
         analysis_type = kwargs.get("analysis_type", "comprehensive")
         output_dir = kwargs.get("output_dir", "~/Library/selvage-eval-agent/analysis_results")
@@ -1844,23 +1844,23 @@ class StatisticalAnalysisTool(Tool):
             
             # 분석 실행
             if analysis_type == "comprehensive":
-                analysis = await self._comprehensive_analysis(all_results)
+                analysis = self._comprehensive_analysis(all_results)
             elif analysis_type == "model_comparison":
-                analysis = await self._model_comparison_analysis(all_results)
+                analysis = self._model_comparison_analysis(all_results)
             elif analysis_type == "failure_pattern":
-                analysis = await self._failure_pattern_analysis(all_results)
+                analysis = self._failure_pattern_analysis(all_results)
             elif analysis_type == "repo_analysis":
-                analysis = await self._repo_analysis(all_results)
+                analysis = self._repo_analysis(all_results)
             
             # 결과 저장
-            analysis_file = await self._save_analysis_results(
+            analysis_file = self._save_analysis_results(
                 analysis_type, analysis, output_path
             )
             
             # 시각화 생성
             visualization_files = []
             if generate_visualizations:
-                visualization_files = await self._generate_visualizations(
+                visualization_files = self._generate_visualizations(
                     analysis, output_path
                 )
             
@@ -1881,7 +1881,7 @@ class StatisticalAnalysisTool(Tool):
                 error_message=f"Statistical analysis failed: {str(e)}"
             )
     
-    async def _comprehensive_analysis(self, results: List[Dict]) -> Dict[str, Any]:
+    def _comprehensive_analysis(self, results: List[Dict]) -> Dict[str, Any]:
         """종합 통계 분석"""
         import numpy as np
         
@@ -1975,7 +1975,7 @@ class StatisticalAnalysisTool(Tool):
         
         return recommendations
     
-    async def _save_analysis_results(self, analysis_type: str, analysis: Dict, 
+    def _save_analysis_results(self, analysis_type: str, analysis: Dict, 
                                    output_path: Path) -> str:
         """분석 결과 저장"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1987,7 +1987,7 @@ class StatisticalAnalysisTool(Tool):
         
         return str(file_path)
     
-    async def _generate_visualizations(self, analysis: Dict, output_path: Path) -> List[str]:
+    def _generate_visualizations(self, analysis: Dict, output_path: Path) -> List[str]:
         """시각화 생성"""
         import matplotlib.pyplot as plt
         import seaborn as sns

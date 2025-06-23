@@ -9,9 +9,15 @@
 
 #### 구현 명세
 ```python
-# 파일 읽기
-with open('config.yml', 'r') as f:
-    config = yaml.safe_load(f)
+# 파일 읽기 (동기 방식)
+import yaml
+
+def load_config(config_path: str) -> dict:
+    """설정 파일을 동기적으로 로드"""
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+config = load_config('config.yml')
 
 # 설정 파일에서 target_repositories 로딩
 target_repositories = config.target_repositories
@@ -25,11 +31,27 @@ for repo in target_repositories:
 ```
 
 ```python
-# Git 명령어 패턴
-commands = [
-    "git log --grep='fix|feature|refactor' --oneline",
-    "git show --stat <commit_id>"
-]
+# Git 명령어 패턴 (동기 실행)
+import subprocess
+
+def execute_git_command(command: str, cwd: str) -> str:
+    """Git 명령어를 동기적으로 실행"""
+    result = subprocess.run(
+        command,
+        shell=True,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=60
+    )
+    if result.returncode == 0:
+        return result.stdout
+    else:
+        raise RuntimeError(f"Git command failed: {result.stderr}")
+
+# 사용 예시
+commits = execute_git_command("git log --grep='fix|feature|refactor' --oneline", repo_path)
+commit_details = execute_git_command(f"git show --stat {commit_id}", repo_path)
 ```
 
 #### 필터링 기준

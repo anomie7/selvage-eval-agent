@@ -134,7 +134,12 @@ selvage-eval-results/
 ### 핵심 의존성
 - `deepeval` - LLM 평가 프레임워크
 - `pytest` - 테스트 프레임워크
-- subprocess 실행 및 데이터 처리를 위한 표준 라이브러리
+- `subprocess` - 명령어 실행을 위한 표준 라이브러리
+- 표준 라이브러리 (`open()`, `json`, `os` 등) - 파일 I/O 및 데이터 처리
+
+### 제거된 의존성 (동기화 변경으로)
+- ~~`aiofiles`~~ → 표준 `open()` 함수 사용
+- ~~`asyncio`~~ → 동기적 처리로 변경
 
 ### 환경 설정
 ```bash

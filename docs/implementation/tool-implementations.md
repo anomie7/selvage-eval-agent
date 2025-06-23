@@ -59,7 +59,7 @@ class ExecuteSafeCommandTool(Tool):
             "required": ["command"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         command = kwargs["command"]
         cwd = kwargs.get("cwd", None)
         timeout = kwargs.get("timeout", 60)
@@ -74,33 +74,33 @@ class ExecuteSafeCommandTool(Tool):
                 )
             
             # 명령어 실행
-            process = await asyncio.create_subprocess_shell(
-                command,
-                cwd=cwd,
-                stdout=asyncio.subprocess.PIPE if capture_output else None,
-                stderr=asyncio.subprocess.PIPE if capture_output else None
-            )
-            
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), 
-                timeout=timeout
-            )
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=capture_output,
+                    text=True,
+                    timeout=timeout
+                )
+                stdout = result.stdout if result.stdout else ""
+                stderr = result.stderr if result.stderr else ""
+                returncode = result.returncode
+            except subprocess.TimeoutExpired:
+                return ToolResult(
+                    success=False,
+                    error_message=f"Command timed out after {timeout} seconds"
+                )
             
             return ToolResult(
-                success=process.returncode == 0,
+                success=returncode == 0,
                 data={
-                    "returncode": process.returncode,
-                    "stdout": stdout.decode() if stdout else "",
-                    "stderr": stderr.decode() if stderr else "",
+                    "returncode": returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
                     "command": command
                 },
-                error_message=stderr.decode() if process.returncode != 0 and stderr else None
-            )
-            
-        except asyncio.TimeoutError:
-            return ToolResult(
-                success=False,
-                error_message=f"Command timed out after {timeout} seconds"
+                error_message=stderr if returncode != 0 and stderr else None
             )
         except Exception as e:
             return ToolResult(
@@ -193,7 +193,7 @@ class ReadFileTool(Tool):
             "required": ["file_path"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         encoding = kwargs.get("encoding", "utf-8")
         max_size_mb = kwargs.get("max_size_mb", 10)
@@ -294,7 +294,7 @@ class WriteFileTool(Tool):
             "required": ["file_path", "content"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         content = kwargs["content"]
         encoding = kwargs.get("encoding", "utf-8")
@@ -365,7 +365,7 @@ class ListDirectoryTool(Tool):
             "required": ["directory_path"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         directory_path = kwargs["directory_path"]
         recursive = kwargs.get("recursive", False)
         include_hidden = kwargs.get("include_hidden", False)
@@ -468,7 +468,7 @@ class FileExistsTool(Tool):
             "required": ["file_path"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         
         try:
