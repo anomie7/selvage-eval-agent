@@ -121,7 +121,7 @@ class SessionState:
         """
         return self.phase_states.get(phase, {}).get("completed", False)
     
-    async def persist_to_disk(self, file_path: str) -> None:
+    def persist_to_disk(self, file_path: str) -> None:
         """디스크에 상태 저장
         
         Args:
@@ -150,7 +150,7 @@ class SessionState:
             raise
     
     @classmethod
-    async def load_from_disk(cls, file_path: str) -> 'SessionState':
+    def load_from_disk(cls, file_path: str) -> 'SessionState':
         """디스크에서 상태 로드
         
         Args:
@@ -179,7 +179,7 @@ class SessionState:
             logger.error(f"Failed to load session state: {e}")
             raise
     
-    async def auto_persist(self, output_dir: str, interval: int = 300) -> None:
+    def auto_persist(self, output_dir: str, interval: int = 300) -> None:
         """자동 영속화 시작 (5분마다)
         
         Args:
@@ -192,13 +192,20 @@ class SessionState:
             while True:
                 try:
                     await asyncio.sleep(interval)
-                    await self.persist_to_disk(state_file)
+                    self.persist_to_disk(state_file)
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
                     logger.error(f"Auto-persist failed: {e}")
         
-        task = asyncio.create_task(persist_loop())
+        # 백그라운드에서 자동 영속화 태스크 시작
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        self._auto_persist_task = loop.create_task(persist_loop())
         logger.info(f"Started auto-persist (interval: {interval}s)")
     
     def get_session_summary(self) -> Dict[str, Any]:

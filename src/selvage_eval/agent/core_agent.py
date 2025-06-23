@@ -11,7 +11,6 @@ from selvage_eval.tools.tool_executor import ToolExecutor
 
 from ..config.settings import EvaluationConfig
 from ..tools.base import ToolResult, ExecutionPlan
-from ..memory.working_memory import get_working_memory
 from ..memory.session_state import SessionState
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,6 @@ class SelvageEvaluationAgent:
             config: Evaluation configuration
         """
         self.config = config
-        self.working_memory = get_working_memory()
         self.session_state: Optional[SessionState] = None
         self.current_phase: Optional[str] = None
         self.is_interactive_mode = False
