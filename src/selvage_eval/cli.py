@@ -3,7 +3,6 @@
 명령행 인터페이스를 통한 에이전트 실행을 제공합니다.
 """
 
-import asyncio
 import argparse
 import sys
 import logging
@@ -26,7 +25,7 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
+def interactive_mode(agent: SelvageEvaluationAgent) -> None:
     """대화형 모드 실행
     
     Args:
@@ -37,7 +36,7 @@ async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
     print("-" * 50)
     
     # 세션 시작
-    session_id = await agent.start_session()
+    session_id = agent.start_session()
     print(f"[SESSION] 새 세션을 시작했습니다: {session_id}")
     print()
     
@@ -53,7 +52,7 @@ async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
                 continue
             
             print("[PROCESSING] 처리 중...")
-            response = await agent.handle_user_message(user_input)
+            response = agent.handle_user_message(user_input)
             print(f"[RESPONSE] 답변: {response}")
             print()
             
@@ -64,7 +63,7 @@ async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
             print(f"[ERROR] 오류가 발생했습니다: {e}")
 
 
-async def automatic_mode(agent: SelvageEvaluationAgent) -> None:
+def automatic_mode(agent: SelvageEvaluationAgent) -> None:
     """자동 실행 모드
     
     Args:
@@ -74,7 +73,7 @@ async def automatic_mode(agent: SelvageEvaluationAgent) -> None:
     print("-" * 50)
     
     try:
-        result = await agent.execute_evaluation()
+        result = agent.execute_evaluation()
         print("[SUCCESS] 평가가 완료되었습니다.")
         print(f"[RESULT] 결과: {result}")
         
@@ -184,9 +183,9 @@ def main() -> None:
         
         # 실행 모드 선택
         if args.auto:
-            asyncio.run(automatic_mode(agent))
+            automatic_mode(agent)
         else:
-            asyncio.run(interactive_mode(agent))
+            interactive_mode(agent)
             
     except Exception as e:
         print(f"[ERROR] 실행 중 오류가 발생했습니다: {e}")

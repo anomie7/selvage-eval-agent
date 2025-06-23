@@ -72,7 +72,7 @@ class Tool(ABC):
         pass
     
     @abstractmethod
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         """도구 실행"""
         pass
     
@@ -88,7 +88,7 @@ class Tool(ABC):
         # TODO: JSON Schema 기반 검증 구현
         return True
     
-    async def execute_with_timing(self, **kwargs) -> ToolResult:
+    def execute_with_timing(self, **kwargs) -> ToolResult:
         """실행 시간 측정을 포함한 도구 실행
         
         Args:
@@ -100,7 +100,7 @@ class Tool(ABC):
         start_time = time.time()
         
         try:
-            result = await self.execute(**kwargs)
+            result = self.execute(**kwargs)
             result.execution_time = time.time() - start_time
             return result
         except Exception as e:

@@ -6,7 +6,6 @@
 import os
 import json
 from typing import Any, Dict
-import aiofiles
 
 from .base import Tool, ToolResult
 
@@ -47,7 +46,7 @@ class ReadFileTool(Tool):
             "required": ["file_path"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         encoding = kwargs.get("encoding", "utf-8")
         max_size_mb = kwargs.get("max_size_mb", 10)
@@ -72,8 +71,8 @@ class ReadFileTool(Tool):
                 )
             
             # 파일 읽기
-            async with aiofiles.open(file_path, 'r', encoding=encoding) as f:
-                content = await f.read()
+            with open(file_path, 'r', encoding=encoding) as f:
+                content = f.read()
             
             # JSON 파싱 (필요시)
             if as_json:
@@ -150,7 +149,7 @@ class WriteFileTool(Tool):
             "required": ["file_path", "content"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         content = kwargs["content"]
         encoding = kwargs.get("encoding", "utf-8")
@@ -167,8 +166,8 @@ class WriteFileTool(Tool):
                 content = json.dumps(content, indent=2, ensure_ascii=False)
             
             # 파일 쓰기
-            async with aiofiles.open(file_path, 'w', encoding=encoding) as f:
-                await f.write(content)
+            with open(file_path, 'w', encoding=encoding) as f:
+                f.write(content)
             
             return ToolResult(
                 success=True,
@@ -211,7 +210,7 @@ class FileExistsTool(Tool):
             "required": ["file_path"]
         }
     
-    async def execute(self, **kwargs) -> ToolResult:
+    def execute(self, **kwargs) -> ToolResult:
         file_path = kwargs["file_path"]
         
         try:

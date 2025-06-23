@@ -5,7 +5,6 @@ Supports both interactive mode and automatic execution mode.
 """
 
 import json
-import asyncio
 from typing import Dict, List, Any, Optional
 import logging
 
@@ -13,7 +12,7 @@ from ..config.settings import EvaluationConfig
 from ..tools.base import Tool, ToolResult, ExecutionPlan
 from ..tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
 from ..tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
-from ..memory.working_memory import WorkingMemory, get_working_memory
+from ..memory.working_memory import get_working_memory
 from ..memory.session_state import SessionState
 
 logger = logging.getLogger(__name__)
@@ -57,7 +56,7 @@ class SelvageEvaluationAgent:
         logger.debug(f"Initialized {len(tools)} tools")
         return tools
     
-    async def start_session(self, session_id: Optional[str] = None) -> str:
+    def start_session(self, session_id: Optional[str] = None) -> str:
         """Start new evaluation session
         
         Args:
@@ -69,15 +68,15 @@ class SelvageEvaluationAgent:
         self.session_state = SessionState(session_id)
         
         # Save session metadata
-        await self._save_session_metadata()
+        self._save_session_metadata()
         
         # Start auto-persistence
-        await self.session_state.auto_persist(self.config.evaluation.output_dir)
+        self.session_state.auto_persist(self.config.evaluation.output_dir)
         
         logger.info(f"Started evaluation session: {self.session_state.session_id}")
         return self.session_state.session_id
     
-    async def handle_user_message(self, message: str) -> str:
+    def handle_user_message(self, message: str) -> str:
         """
         Handle user message using modern agent pattern
         
@@ -93,13 +92,13 @@ class SelvageEvaluationAgent:
             Response result
         """
         if not self.session_state:
-            await self.start_session()
+            self.start_session()
         
         self.is_interactive_mode = True
         
         try:
             # 1. LLM-based query analysis and execution planning
-            plan = await self.plan_execution(message)
+            plan = self.plan_execution(message)
             
             # 2. Safety validation
             if not self._validate_plan_safety(plan):
@@ -108,7 +107,7 @@ class SelvageEvaluationAgent:
             # 3. Execute tools according to plan
             tool_results = []
             for tool_call in plan.tool_calls:
-                result = await self.execute_tool(tool_call.tool, tool_call.params)
+                result = self.execute_tool(tool_call.tool, tool_call.params)
                 tool_results.append({
                     "tool": tool_call.tool,
                     "result": result,
@@ -116,13 +115,13 @@ class SelvageEvaluationAgent:
                 })
             
             # 4. Generate final response based on tool results
-            return await self.generate_response(message, plan, tool_results)
+            return self.generate_response(message, plan, tool_results)
             
         except Exception as e:
             logger.error(f"Error handling user message: {e}")
             return f"Error occurred while processing message: {str(e)}"
     
-    async def plan_execution(self, user_query: str) -> ExecutionPlan:
+    def plan_execution(self, user_query: str) -> ExecutionPlan:
         """Query analysis and execution planning via LLM
         
         Args:
@@ -132,7 +131,7 @@ class SelvageEvaluationAgent:
             Execution plan
         """
         # Collect current state information
-        current_state = await self._analyze_current_state()
+        current_state = self._analyze_current_state()
         
         # TODO: Implement actual LLM call
         # For now, use simple rule-based planning
@@ -206,7 +205,7 @@ class SelvageEvaluationAgent:
                 expected_outcome="Output directory file list"
             )
     
-    async def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
+    def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
         """Generate final response to user based on tool execution results
         
         Args:
@@ -255,7 +254,7 @@ class SelvageEvaluationAgent:
         
         return "\n".join(response_parts)
     
-    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+    def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
         """Execute tool
         
         Args:
@@ -274,7 +273,7 @@ class SelvageEvaluationAgent:
         
         tool = self.tools[tool_name]
         try:
-            result = await tool.execute_with_timing(**params)
+            result = tool.execute_with_timing(**params)
             logger.debug(f"Executed tool {tool_name} in {result.execution_time:.2f}s")
             return result
         except Exception as e:
@@ -307,7 +306,7 @@ class SelvageEvaluationAgent:
         
         return True
     
-    async def execute_evaluation(self) -> Dict[str, Any]:
+    def execute_evaluation(self) -> Dict[str, Any]:
         """
         Execute evaluation process using agent approach
         Analyze state and dynamically decide next actions
@@ -316,30 +315,30 @@ class SelvageEvaluationAgent:
             Evaluation result dictionary
         """
         if not self.session_state:
-            await self.start_session()
+            self.start_session()
         
         logger.info("Starting automatic evaluation execution")
         
         while True:
             # Analyze current state
-            current_state = await self._analyze_current_state()
+            current_state = self._analyze_current_state()
             
             # Decide next action
-            next_action = await self._decide_next_action(current_state)
+            next_action = self._decide_next_action(current_state)
             
             if next_action == "COMPLETE":
                 break
                 
             # Execute action
-            action_result = await self._execute_action(next_action, current_state)
+            action_result = self._execute_action(next_action, current_state)
             
             # Save result and update state
-            await self._update_state(action_result)
+            self._update_state(action_result)
         
         # Generate final report
-        return await self._generate_final_report()
+        return self._generate_final_report()
     
-    async def _analyze_current_state(self) -> Dict[str, Any]:
+    def _analyze_current_state(self) -> Dict[str, Any]:
         """
         Analyze current state to determine which phases have been completed
         
@@ -358,20 +357,20 @@ class SelvageEvaluationAgent:
         
         # Phase 1: Check commit collection status
         commits_file = self.config.get_output_path("meaningful_commits.json")
-        commits_exist = await self.execute_tool("file_exists", {"file_path": commits_file})
+        commits_exist = self.execute_tool("file_exists", {"file_path": commits_file})
         if commits_exist.success and commits_exist.data.get("exists"):
             state["completed_phases"].append("commit_collection")
             # TODO: Load actual commit data
         
         # Phase 2: Check review execution status
         review_logs_dir = self.config.get_output_path("review_logs")
-        review_logs_exist = await self.execute_tool("file_exists", {"file_path": review_logs_dir})
+        review_logs_exist = self.execute_tool("file_exists", {"file_path": review_logs_dir})
         if review_logs_exist.success and review_logs_exist.data.get("exists"):
             state["completed_phases"].append("review_execution")
         
         # Phase 3: Check DeepEval results
         eval_results_file = self.config.get_output_path("evaluations", "evaluation_results.json")
-        eval_results_exist = await self.execute_tool("file_exists", {"file_path": eval_results_file})
+        eval_results_exist = self.execute_tool("file_exists", {"file_path": eval_results_file})
         if eval_results_exist.success and eval_results_exist.data.get("exists"):
             state["completed_phases"].append("deepeval_conversion")
         
@@ -389,7 +388,7 @@ class SelvageEvaluationAgent:
         
         return state
     
-    async def _decide_next_action(self, current_state: Dict[str, Any]) -> str:
+    def _decide_next_action(self, current_state: Dict[str, Any]) -> str:
         """
         Decide next action based on current state
         
@@ -415,7 +414,7 @@ class SelvageEvaluationAgent:
         
         return f"EXECUTE_{next_phase.upper()}"
     
-    async def _execute_action(self, action: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_action(self, action: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute decided action
         
@@ -430,43 +429,43 @@ class SelvageEvaluationAgent:
         
         # TODO: Implement concrete phase implementations
         if action == "EXECUTE_COMMIT_COLLECTION":
-            return await self._execute_phase1_commit_collection()
+            return self._execute_phase1_commit_collection()
         elif action == "EXECUTE_REVIEW_EXECUTION":
-            return await self._execute_phase2_review_execution(current_state)
+            return self._execute_phase2_review_execution(current_state)
         elif action == "EXECUTE_DEEPEVAL_CONVERSION":
-            return await self._execute_phase3_deepeval_conversion(current_state)
+            return self._execute_phase3_deepeval_conversion(current_state)
         elif action == "EXECUTE_ANALYSIS":
-            return await self._execute_phase4_analysis(current_state)
+            return self._execute_phase4_analysis(current_state)
         elif action.startswith("SKIP_TO_"):
             return {"action": action, "skipped": True}
         else:
             raise ValueError(f"Unknown action: {action}")
     
-    async def _execute_phase1_commit_collection(self) -> Dict[str, Any]:
+    def _execute_phase1_commit_collection(self) -> Dict[str, Any]:
         """Phase 1: Commit collection execution (placeholder implementation)"""
         logger.info("Executing Phase 1: Commit Collection")
         # TODO: Actual implementation
         return {"phase": "commit_collection", "status": "placeholder"}
     
-    async def _execute_phase2_review_execution(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_phase2_review_execution(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
         """Phase 2: Review execution (placeholder implementation)"""
         logger.info("Executing Phase 2: Review Execution")
         # TODO: Actual implementation
         return {"phase": "review_execution", "status": "placeholder"}
     
-    async def _execute_phase3_deepeval_conversion(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_phase3_deepeval_conversion(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
         """Phase 3: DeepEval conversion (placeholder implementation)"""
         logger.info("Executing Phase 3: DeepEval Conversion")
         # TODO: Actual implementation
         return {"phase": "deepeval_conversion", "status": "placeholder"}
     
-    async def _execute_phase4_analysis(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_phase4_analysis(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
         """Phase 4: Analysis (placeholder implementation)"""
         logger.info("Executing Phase 4: Analysis")
         # TODO: Actual implementation
         return {"phase": "analysis", "status": "placeholder"}
     
-    async def _update_state(self, action_result: Dict[str, Any]) -> None:
+    def _update_state(self, action_result: Dict[str, Any]) -> None:
         """Update state with action execution result
         
         Args:
@@ -479,7 +478,7 @@ class SelvageEvaluationAgent:
             if action_result.get("status") == "completed":
                 self.session_state.mark_phase_completed(phase)
     
-    async def _generate_final_report(self) -> Dict[str, Any]:
+    def _generate_final_report(self) -> Dict[str, Any]:
         """Generate final evaluation report
         
         Returns:
@@ -494,7 +493,7 @@ class SelvageEvaluationAgent:
             "status": "completed"
         }
     
-    async def _save_session_metadata(self) -> None:
+    def _save_session_metadata(self) -> None:
         """Save session metadata"""
         if not self.session_state:
             return
@@ -513,7 +512,7 @@ class SelvageEvaluationAgent:
         }
         
         metadata_file = self.config.get_output_path("session_metadata.json")
-        await self.execute_tool("write_file", {
+        self.execute_tool("write_file", {
             "file_path": metadata_file,
             "content": metadata,
             "as_json": True
