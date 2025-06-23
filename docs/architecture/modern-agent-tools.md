@@ -214,23 +214,11 @@ tool_calls = [
 
 # ToolExecutor가 자동으로 타입 체크 및 변환 후 실행
 executor = ToolExecutor()
-executor.register_tool(ExecuteSafeCommandTool())
-results = executor.execute_multiple_tool_calls(tool_calls)
+results = executor.execute_tool_call(tool_calls)
 ```
 
-## 범용 도구 vs 특수 도구
+## 범용 도구 방식
 
-### ❌ 특수 도구 방식 (기존):
-```python
-# 매번 새 도구 필요
-commit_data_query()
-commit_data_query_with_filters()
-commit_data_query_by_date()
-review_result_query()
-review_result_by_model()
-```
-
-### ✅ 범용 도구 방식 (현대적):
 ```json
 {
   "tool_calls": [
