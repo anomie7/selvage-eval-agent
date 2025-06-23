@@ -1,54 +1,13 @@
 """도구 시스템 기본 인터페이스
 
-모든 도구의 기본 인터페이스와 공통 데이터 구조를 정의합니다.
+Tool 추상 클래스와 관련 헬퍼 함수들을 정의합니다.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, get_type_hints, Union
-import time
+from typing import Any, Dict, List, Union, get_type_hints
 import inspect
 
-
-@dataclass
-class ToolResult:
-    """도구 실행 결과"""
-    success: bool
-    data: Any
-    error_message: Optional[str] = None
-    execution_time: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ToolCall:
-    """도구 호출 정보"""
-    tool: str
-    params: Dict[str, Any]
-    rationale: str
-
-
-@dataclass 
-class ExecutionPlan:
-    """LLM이 생성한 실행 계획"""
-    intent_summary: str
-    confidence: float
-    parameters: Dict[str, Any]
-    tool_calls: List[ToolCall]
-    safety_check: str
-    expected_outcome: str
-    
-    @classmethod
-    def from_json(cls, json_data: Dict[str, Any]) -> 'ExecutionPlan':
-        """JSON 데이터에서 ExecutionPlan 객체 생성"""
-        return cls(
-            intent_summary=json_data["intent_summary"],
-            confidence=json_data["confidence"],
-            parameters=json_data["parameters"],
-            tool_calls=[ToolCall(**tc) for tc in json_data["tool_calls"]],
-            safety_check=json_data["safety_check"],
-            expected_outcome=json_data["expected_outcome"]
-        )
+from .tool_result import ToolResult
 
 
 class Tool(ABC):
@@ -95,7 +54,8 @@ class Tool(ABC):
             ToolResult: 도구 실행 결과
         """
         pass
-    
+
+
 class PhaseExecutionError(Exception):
     """Phase 실행 중 발생하는 에러"""
     pass
@@ -201,4 +161,4 @@ def _get_json_schema_type(python_type) -> Dict[str, Any]:
             return schema
     
     # 직접 매핑
-    return type_mapping.get(python_type, {"type": "string"})
+    return type_mapping.get(python_type, {"type": "string"}) 

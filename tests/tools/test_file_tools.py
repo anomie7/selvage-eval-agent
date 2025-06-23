@@ -7,7 +7,9 @@ import pytest
 import json
 from unittest.mock import patch
 
-from selvage_eval.tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
+from selvage_eval.tools.read_file_tool import ReadFileTool
+from selvage_eval.tools.write_file_tool import WriteFileTool
+from selvage_eval.tools.file_exists_tool import FileExistsTool
 
 
 @pytest.mark.unit
@@ -109,6 +111,7 @@ class TestReadFileTool:
             result = tool.execute(file_path="/test/file.txt")
             
             assert result.success is False
+            assert result.error_message is not None
             assert "Unable to decode file" in result.error_message
     
     @patch("builtins.open", side_effect=PermissionError("Permission denied"))

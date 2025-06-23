@@ -7,10 +7,15 @@ import pytest
 import time
 from unittest.mock import MagicMock, patch
 
-from selvage_eval.tools.tool_executor import ToolExecutor, ToolGenerator
-from selvage_eval.tools.base import ToolResult, Tool
-from selvage_eval.tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
-from selvage_eval.tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
+from selvage_eval.tools.tool_executor import ToolExecutor
+from selvage_eval.tools.tool_generator import ToolGenerator
+from selvage_eval.tools.tool_result import ToolResult
+from selvage_eval.tools.tool import Tool
+from selvage_eval.tools.read_file_tool import ReadFileTool
+from selvage_eval.tools.write_file_tool import WriteFileTool
+from selvage_eval.tools.file_exists_tool import FileExistsTool
+from selvage_eval.tools.execute_safe_command_tool import ExecuteSafeCommandTool
+from selvage_eval.tools.list_directory_tool import ListDirectoryTool
 
 
 @pytest.mark.unit
@@ -56,6 +61,7 @@ class TestToolExecutor:
             )
         
         assert result.success is False
+        assert result.error_message is not None
         assert "Invalid parameters for tool 'read_file'" in result.error_message
         # execution_time은 0일 수도 있음 (빠른 실행)
         
@@ -93,6 +99,7 @@ class TestToolExecutor:
             )
         
         assert result.success is False
+        assert result.error_message is not None
         assert "Tool execution failed" in result.error_message
         assert "Unknown tool" in result.error_message
         assert result.execution_time > 0
@@ -371,6 +378,7 @@ class TestToolExecutorIntegration:
             {"file_path": "/nonexistent/file.txt"}
         )
         assert result1.success is False
+        assert result1.error_message is not None
         assert "File not found" in result1.error_message
         
         # 2. 잘못된 파라미터로 도구 호출
@@ -379,6 +387,7 @@ class TestToolExecutorIntegration:
             {"invalid_param": "value"}
         )
         assert result2.success is False
+        assert result2.error_message is not None
         assert "Invalid parameters" in result2.error_message
         
         # 3. 알 수 없는 도구 호출
@@ -387,4 +396,5 @@ class TestToolExecutorIntegration:
             {"param": "value"}
         )
         assert result3.success is False
+        assert result3.error_message is not None
         assert "Tool execution failed" in result3.error_message

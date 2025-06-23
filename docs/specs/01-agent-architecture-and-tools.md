@@ -197,7 +197,6 @@ class SelvageEvaluationAgent:
     
     def __init__(self, config: EvaluationConfig):
         self.config = config
-        self.tools = self._initialize_tools()
         self.session_state = SessionState()
         self.current_phase = None
         self.llm = self._initialize_llm()  # Query Planning용 LLM

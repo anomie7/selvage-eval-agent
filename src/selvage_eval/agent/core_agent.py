@@ -7,10 +7,12 @@ Supports both interactive mode and automatic execution mode.
 from typing import Dict, List, Any, Optional
 import logging
 
+from selvage_eval.tools.execution_plan import ExecutionPlan
+from selvage_eval.tools.tool_call import ToolCall
 from selvage_eval.tools.tool_executor import ToolExecutor
+from selvage_eval.tools.tool_result import ToolResult
 
 from ..config.settings import EvaluationConfig
-from ..tools.base import ToolResult, ExecutionPlan
 from ..memory.session_state import SessionState
 
 logger = logging.getLogger(__name__)
@@ -130,7 +132,6 @@ class SelvageEvaluationAgent:
         Returns:
             Execution plan
         """
-        from ..tools.base import ToolCall
         
         query_lower = user_query.lower()
         

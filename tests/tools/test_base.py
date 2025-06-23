@@ -3,14 +3,15 @@
 기본 인터페이스, 데이터 클래스 및 헬퍼 함수들을 테스트합니다.
 """
 
+from pydoc import describe
 import pytest
 from typing import List, Dict, Optional, Union, Any
 from dataclasses import dataclass
 
-from selvage_eval.tools.base import (
-    ToolResult, ToolCall, ExecutionPlan, Tool,
-    generate_parameters_schema_from_hints, _get_json_schema_type
-)
+from selvage_eval.tools.tool_result import ToolResult
+from selvage_eval.tools.tool_call import ToolCall
+from selvage_eval.tools.execution_plan import ExecutionPlan
+from selvage_eval.tools.tool import Tool, generate_parameters_schema_from_hints, _get_json_schema_type
 
 
 @pytest.mark.unit
@@ -240,11 +241,6 @@ class TestGetJsonSchemaType:
 class TestToolInterface:
     """Tool 추상 클래스 인터페이스 테스트"""
     
-    def test_tool_interface_is_abstract(self):
-        """Tool 클래스가 추상 클래스인지 확인"""
-        with pytest.raises(TypeError):
-            Tool()
-    
     def test_tool_interface_methods(self):
         """Tool 인터페이스의 추상 메서드들 확인"""
         abstract_methods = Tool.__abstractmethods__
@@ -261,14 +257,14 @@ class TestExceptions:
     
     def test_phase_execution_error(self):
         """PhaseExecutionError 예외 테스트"""
-        from selvage_eval.tools.base import PhaseExecutionError
+        from selvage_eval.tools.tool import PhaseExecutionError
         
         with pytest.raises(PhaseExecutionError):
             raise PhaseExecutionError("Phase 실행 실패")
     
     def test_resource_limit_exceeded(self):
         """ResourceLimitExceeded 예외 테스트"""
-        from selvage_eval.tools.base import ResourceLimitExceeded
+        from selvage_eval.tools.tool import ResourceLimitExceeded
         
         with pytest.raises(ResourceLimitExceeded):
             raise ResourceLimitExceeded("리소스 한계 초과")

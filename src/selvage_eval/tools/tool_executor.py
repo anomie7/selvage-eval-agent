@@ -3,13 +3,11 @@
 LLM이 반환한 tool_calls를 파싱하여 타입 체크 후 실제 도구 함수를 호출합니다.
 """
 
-import inspect
 import time
-from typing import Any, Dict, List, Type, get_type_hints, Union
+from typing import Any, Dict, List
 
-from selvage_eval.tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
-from selvage_eval.tools.file_tools import FileExistsTool, ReadFileTool, WriteFileTool
-from .base import Tool, ToolResult
+from .tool_result import ToolResult
+from .tool_generator import ToolGenerator
 
 
 class ToolExecutor:
@@ -72,23 +70,3 @@ class ToolExecutor:
             results.append(result)
             
         return results
-    
-
-
-class ToolGenerator:
-    """ToolGenerator class"""
-
-    def generate_tool(self, tool_name: str, params: Dict[str, Any]) -> Tool:
-        """Generate a tool"""
-        if tool_name == "read_file":
-            return ReadFileTool()
-        elif tool_name == "write_file":
-            return WriteFileTool()
-        elif tool_name == "file_exists":
-            return FileExistsTool()
-        elif tool_name == "execute_safe_command":
-            return ExecuteSafeCommandTool()
-        elif tool_name == "list_directory":
-            return ListDirectoryTool()
-        else:
-            raise ValueError(f"Unknown tool: {tool_name}")
