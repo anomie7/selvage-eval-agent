@@ -32,13 +32,13 @@ async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
     Args:
         agent: 에이전트 인스턴스
     """
-    print("🤖 Selvage 평가 에이전트 (대화형 모드)")
+    print("[INTERACTIVE] Selvage 평가 에이전트 (대화형 모드)")
     print("종료하려면 'quit' 또는 'exit'를 입력하세요.")
     print("-" * 50)
     
     # 세션 시작
     session_id = await agent.start_session()
-    print(f"📊 새 세션을 시작했습니다: {session_id}")
+    print(f"[SESSION] 새 세션을 시작했습니다: {session_id}")
     print()
     
     while True:
@@ -46,22 +46,22 @@ async def interactive_mode(agent: SelvageEvaluationAgent) -> None:
             user_input = input("👤 질문: ").strip()
             
             if user_input.lower() in ['quit', 'exit', '종료']:
-                print("👋 세션을 종료합니다.")
+                print("[EXIT] 세션을 종료합니다.")
                 break
                 
             if not user_input:
                 continue
             
-            print("🤖 처리 중...")
+            print("[PROCESSING] 처리 중...")
             response = await agent.handle_user_message(user_input)
-            print(f"🤖 답변: {response}")
+            print(f"[RESPONSE] 답변: {response}")
             print()
             
         except KeyboardInterrupt:
-            print("\n👋 세션을 종료합니다.")
+            print("\n[EXIT] 세션을 종료합니다.")
             break
         except Exception as e:
-            print(f"❌ 오류가 발생했습니다: {e}")
+            print(f"[ERROR] 오류가 발생했습니다: {e}")
 
 
 async def automatic_mode(agent: SelvageEvaluationAgent) -> None:
@@ -70,16 +70,16 @@ async def automatic_mode(agent: SelvageEvaluationAgent) -> None:
     Args:
         agent: 에이전트 인스턴스
     """
-    print("🚀 Selvage 평가 에이전트 (자동 실행 모드)")
+    print("[AUTO] Selvage 평가 에이전트 (자동 실행 모드)")
     print("-" * 50)
     
     try:
         result = await agent.execute_evaluation()
-        print("✅ 평가가 완료되었습니다.")
-        print(f"📊 결과: {result}")
+        print("[SUCCESS] 평가가 완료되었습니다.")
+        print(f"[RESULT] 결과: {result}")
         
     except Exception as e:
-        print(f"❌ 평가 실행 중 오류가 발생했습니다: {e}")
+        print(f"[ERROR] 평가 실행 중 오류가 발생했습니다: {e}")
         sys.exit(1)
 
 
@@ -147,13 +147,13 @@ def main() -> None:
             try:
                 config_path = get_default_config_path()
             except FileNotFoundError:
-                print("❌ 기본 설정 파일을 찾을 수 없습니다.")
+                print("[ERROR] 기본 설정 파일을 찾을 수 없습니다.")
                 print("--config 옵션으로 설정 파일을 지정하거나")
                 print("configs/selvage-eval-config.yml 파일을 생성하세요.")
                 sys.exit(1)
         
         config = load_config(config_path)
-        print(f"📋 설정을 로드했습니다: {config_path}")
+        print(f"[CONFIG] 설정을 로드했습니다: {config_path}")
         
         # 저장소 필터링
         if args.repos:
@@ -162,7 +162,7 @@ def main() -> None:
                 repo for repo in config.target_repositories 
                 if repo.name in repo_names
             ]
-            print(f"🎯 선택된 저장소: {repo_names}")
+            print(f"[TARGET] 선택된 저장소: {repo_names}")
         
         # 모델 필터링
         if args.models:
@@ -171,13 +171,13 @@ def main() -> None:
                 model for model in config.review_models 
                 if model in model_names
             ]
-            print(f"🧠 선택된 모델: {model_names}")
+            print(f"[MODEL] 선택된 모델: {model_names}")
         
         # 강제 재실행 설정
         if args.force_refresh:
             config.workflow.skip_existing.commit_filtering = False
             config.workflow.skip_existing.review_results = False
-            print("🔄 강제 재실행 모드가 활성화되었습니다.")
+            print("[FORCE] 강제 재실행 모드가 활성화되었습니다.")
         
         # 에이전트 생성
         agent = SelvageEvaluationAgent(config)
@@ -189,7 +189,7 @@ def main() -> None:
             asyncio.run(interactive_mode(agent))
             
     except Exception as e:
-        print(f"❌ 실행 중 오류가 발생했습니다: {e}")
+        print(f"[ERROR] 실행 중 오류가 발생했습니다: {e}")
         if args.log_level == "DEBUG":
             import traceback
             traceback.print_exc()

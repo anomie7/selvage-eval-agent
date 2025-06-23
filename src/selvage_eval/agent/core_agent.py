@@ -242,7 +242,7 @@ class SelvageEvaluationAgent:
                 elif tool_name == "list_directory":
                     files = tool_result.data.get("files", [])
                     dirs = tool_result.data.get("directories", [])
-                    response_parts.append(f"[DIRECTORY] Directory contents:")
+                    response_parts.append("[DIRECTORY] Directory contents:")
                     response_parts.append(f"  - Files: {len(files)} items")
                     response_parts.append(f"  - Directories: {len(dirs)} items")
                     if files:

@@ -90,7 +90,7 @@ QUERY_ANALYSIS_PROMPT = """
 # STRICT CONSTRAINTS
 다음 작업들은 절대 수행하지 마세요:
 
-🚫 **절대 금지:**
+**[FORBIDDEN] 절대 금지:**
 - 원본 저장소 파일 수정/삭제
 - selvage-deprecated 저장소 쓰기 작업
 - 시스템 파일 접근
@@ -447,13 +447,13 @@ class SelvageEvaluationAgent:
 
 Claude Code, Cursor와 같은 현대적 에이전트 패턴을 적용하여 **범용 도구 + 적절한 제약** 방식을 사용합니다:
 
-**🔧 핵심 범용 도구 (모든 작업에 사용)**
+**[TOOLS] 핵심 범용 도구 (모든 작업에 사용)**
 - `read_file`: 안전한 파일 읽기 (평가 결과 디렉토리 내에서만)
 - `write_file`: 안전한 파일 쓰기 (결과 저장용)
 - `execute_safe_command`: 제한된 안전 명령어 실행
 - `list_directory`: 디렉토리 탐색 (허용된 경로 내에서만)
 
-**📂 프로젝트 파일 구조 (LLM이 숙지해야 할 컨텍스트)**
+**[STRUCTURE] 프로젝트 파일 구조 (LLM이 숙지해야 할 컨텍스트)**
 ```
 selvage-eval-results/
 ├── session_metadata.json          # 세션 정보 및 설정
@@ -473,7 +473,7 @@ selvage-eval-results/
     └── insights_report.json      # 도출된 인사이트
 ```
 
-**🛡️ 안전 제약사항 (execute_safe_command용)**
+**[SECURITY] 안전 제약사항 (execute_safe_command용)**
 
 허용된 명령어:
 ```bash
@@ -502,7 +502,7 @@ git commit, git push, git merge
 echo >, sed -i, awk (파일 수정 명령)
 ```
 
-**🎯 실제 사용 예시**
+**[EXAMPLE] 실제 사용 예시**
 
 사용자: "cline 저장소에서 최근 일주일 내 fix 관련 커밋만 보여줘"
 

@@ -770,23 +770,23 @@ def generate_actionable_insights(performance_df: pd.DataFrame,
     
     # 성능 기반 인사이트
     best_overall_model = performance_df.loc[performance_df["weighted_score"].idxmax(), "model_name"]
-    insights.append(f"🏆 전체 최고 성능 모델: {best_overall_model} (종합 점수: {performance_df['weighted_score'].max():.3f})")
+    insights.append(f"[BEST] 전체 최고 성능 모델: {best_overall_model} (종합 점수: {performance_df['weighted_score'].max():.3f})")
     
     # 일관성 기반 인사이트
     most_consistent_model = performance_df.loc[performance_df["consistency_score"].idxmax(), "model_name"]
-    insights.append(f"🎯 가장 일관성 있는 모델: {most_consistent_model}")
+    insights.append(f"[CONSISTENT] 가장 일관성 있는 모델: {most_consistent_model}")
     
     # 개선 우선순위
     for metric, patterns in failure_patterns.items():
         if patterns["total_failures"] > 10:
             worst_model = patterns["worst_performing_models"][0][0]
-            insights.append(f"⚠️ {metric} 개선 필요: {worst_model} 모델의 실패율이 높음")
+            insights.append(f"[WARNING] {metric} 개선 필요: {worst_model} 모델의 실패율이 높음")
     
     # 프롬프트 개선 효과
     for comparison, result in prompt_comparison.items():
         for metric, data in result.items():
             if data["is_significant"] and data["improvement"] > 0.1:
-                insights.append(f"📈 {comparison} 비교: {metric}에서 {data['improvement_percentage']:.1f}% 유의미한 개선")
+                insights.append(f"[IMPROVEMENT] {comparison} 비교: {metric}에서 {data['improvement_percentage']:.1f}% 유의미한 개선")
     
     return insights
 ```
