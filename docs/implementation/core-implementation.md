@@ -12,7 +12,6 @@ class SelvageEvaluationAgent:
     def __init__(self, config: EvaluationConfig):
         self.config = config
         self.tool_executor = self._initialize_tool_executor()  # ToolExecutor 사용
-        self.working_memory = WorkingMemory()
         self.session_state = SessionState()
         self.current_phase = None
         self.llm = self._initialize_llm()  # Query Planning용 LLM

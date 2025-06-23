@@ -1,6 +1,6 @@
 """세션 상태 관리
 
-평가 세션의 상태와 체크포인트를 관리합니다.
+평가 세션의 상태를 관리합니다.
 디스크 영속성과 복원 기능을 제공합니다.
 """
 
@@ -8,22 +8,12 @@ import json
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, asdict
 import uuid
 import os
 import logging
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class Checkpoint:
-    """체크포인트 데이터 구조"""
-    checkpoint_id: str
-    phase: str
-    timestamp: datetime
-    state: Dict[str, Any]
-    metadata: Dict[str, Any]
 
 
 class SessionState:
@@ -40,7 +30,6 @@ class SessionState:
         self.current_phase: Optional[str] = None
         self.phase_states: Dict[str, Dict[str, Any]] = {}
         self.global_state: Dict[str, Any] = {}
-        self.checkpoints: List[Checkpoint] = []
         self._state_file: Optional[str] = None
         
         logger.info(f"Initialized session state: {self.session_id}")
@@ -100,66 +89,6 @@ class SessionState:
         self.global_state.update(state_updates)
         logger.debug(f"Updated global state with {len(state_updates)} items")
     
-    def save_checkpoint(self, phase: str, state: Dict[str, Any], 
-                       metadata: Optional[Dict[str, Any]] = None) -> str:
-        """체크포인트 저장
-        
-        Args:
-            phase: 현재 Phase
-            state: 저장할 상태 정보
-            metadata: 추가 메타데이터
-            
-        Returns:
-            생성된 체크포인트 ID
-        """
-        checkpoint_id = f"{phase}_{len(self.checkpoints)}"
-        checkpoint = Checkpoint(
-            checkpoint_id=checkpoint_id,
-            phase=phase,
-            timestamp=datetime.now(),
-            state=state.copy(),
-            metadata=metadata or {}
-        )
-        
-        self.checkpoints.append(checkpoint)
-        logger.info(f"Saved checkpoint: {checkpoint_id}")
-        
-        return checkpoint_id
-    
-    def restore_checkpoint(self, checkpoint_id: str) -> Optional[Dict[str, Any]]:
-        """체크포인트 복원
-        
-        Args:
-            checkpoint_id: 복원할 체크포인트 ID
-            
-        Returns:
-            복원된 상태 정보 또는 None
-        """
-        for checkpoint in self.checkpoints:
-            if checkpoint.checkpoint_id == checkpoint_id:
-                logger.info(f"Restored checkpoint: {checkpoint_id}")
-                return checkpoint.state.copy()
-        
-        logger.warning(f"Checkpoint not found: {checkpoint_id}")
-        return None
-    
-    def get_latest_checkpoint(self, phase: Optional[str] = None) -> Optional[Checkpoint]:
-        """최신 체크포인트 조회
-        
-        Args:
-            phase: 특정 Phase의 체크포인트만 조회 (None이면 전체)
-            
-        Returns:
-            최신 체크포인트 또는 None
-        """
-        filtered_checkpoints = self.checkpoints
-        if phase:
-            filtered_checkpoints = [cp for cp in self.checkpoints if cp.phase == phase]
-        
-        if filtered_checkpoints:
-            return max(filtered_checkpoints, key=lambda cp: cp.timestamp)
-        return None
-    
     def get_completed_phases(self) -> List[str]:
         """완료된 Phase 목록 반환
         
@@ -205,16 +134,6 @@ class SessionState:
                 "current_phase": self.current_phase,
                 "phase_states": self.phase_states,
                 "global_state": self.global_state,
-                "checkpoints": [
-                    {
-                        "checkpoint_id": cp.checkpoint_id,
-                        "phase": cp.phase,
-                        "timestamp": cp.timestamp.isoformat(),
-                        "state": cp.state,
-                        "metadata": cp.metadata
-                    }
-                    for cp in self.checkpoints
-                ]
             }
             
             # 디렉토리 생성 (필요시)
@@ -252,17 +171,6 @@ class SessionState:
             session.global_state = state_data["global_state"]
             session._state_file = file_path
             
-            # 체크포인트 복원
-            session.checkpoints = [
-                Checkpoint(
-                    checkpoint_id=cp_data["checkpoint_id"],
-                    phase=cp_data["phase"],
-                    timestamp=datetime.fromisoformat(cp_data["timestamp"]),
-                    state=cp_data["state"],
-                    metadata=cp_data["metadata"]
-                )
-                for cp_data in state_data["checkpoints"]
-            ]
             
             logger.info(f"Loaded session state from: {file_path}")
             return session
@@ -292,7 +200,6 @@ class SessionState:
         
         task = asyncio.create_task(persist_loop())
         logger.info(f"Started auto-persist (interval: {interval}s)")
-        return task
     
     def get_session_summary(self) -> Dict[str, Any]:
         """세션 요약 정보 반환
@@ -309,6 +216,4 @@ class SessionState:
             "duration_seconds": duration.total_seconds(),
             "current_phase": self.current_phase,
             "completed_phases": completed_phases,
-            "total_checkpoints": len(self.checkpoints),
-            "last_checkpoint": self.get_latest_checkpoint().checkpoint_id if self.checkpoints else None
         }

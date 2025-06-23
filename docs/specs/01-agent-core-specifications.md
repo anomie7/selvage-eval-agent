@@ -16,7 +16,7 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 현대적 에이전트
 ### 구현 가이드
 - [핵심 구현](../implementation/core-implementation.md) - SelvageEvaluationAgent 클래스
 - [도구 구현](../implementation/tool-implementations.md) - 범용 도구 클래스들
-- [상태 관리](../implementation/state-management.md) - WorkingMemory, SessionState
+- [상태 관리](../implementation/state-management.md) - SessionState
 
 ### 배포 및 설정
 - [설정 및 배포](../deployment/configuration-deployment.md) - 설정 파일, 환경 설정

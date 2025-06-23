@@ -198,7 +198,6 @@ class SelvageEvaluationAgent:
     def __init__(self, config: EvaluationConfig):
         self.config = config
         self.tools = self._initialize_tools()
-        self.working_memory = WorkingMemory()
         self.session_state = SessionState()
         self.current_phase = None
         self.llm = self._initialize_llm()  # Query Planning용 LLM
@@ -1140,102 +1139,56 @@ class PhaseTransitionManager:
         return self.transition_rules.get(current_phase)
 ```
 
-## 상태 관리 및 메모리
-
-### Working Memory
-```python
-class WorkingMemory:
-    """에이전트 작업 메모리"""
-    
-    def __init__(self, max_size: int = 1000):
-        self.max_size = max_size
-        self.memory = {}
-        self.access_count = {}
-        self.timestamps = {}
-    
-    def store(self, key: str, value: Any, ttl: Optional[int] = None):
-        """메모리에 저장"""
-        if len(self.memory) >= self.max_size:
-            self._evict_lru()
-        
-        self.memory[key] = value
-        self.access_count[key] = 0
-        self.timestamps[key] = time.time()
-        
-        if ttl:
-            asyncio.create_task(self._schedule_cleanup(key, ttl))
-    
-    def retrieve(self, key: str) -> Optional[Any]:
-        """메모리에서 조회"""
-        if key in self.memory:
-            self.access_count[key] += 1
-            return self.memory[key]
-        return None
-    
-    def _evict_lru(self):
-        """LRU 정책으로 메모리 정리"""
-        if not self.memory:
-            return
-        
-        # 가장 적게 사용된 항목 제거
-        lru_key = min(self.access_count.items(), key=lambda x: x[1])[0]
-        self.remove(lru_key)
-    
-    async def _schedule_cleanup(self, key: str, ttl: int):
-        """TTL 기반 자동 정리"""
-        await asyncio.sleep(ttl)
-        self.remove(key)
-```
+## 상태 관리
 
 ### Session State Management
 ```python
 class SessionState:
     """평가 세션 상태 관리"""
     
-    def __init__(self, session_id: str):
-        self.session_id = session_id
+    def __init__(self, session_id: Optional[str] = None):
+        self.session_id = session_id or self._generate_session_id()
         self.start_time = datetime.now()
         self.current_phase = None
         self.phase_states = {}
         self.global_state = {}
-        self.checkpoints = []
     
-    def save_checkpoint(self, phase: str, state: Dict[str, Any]):
-        """체크포인트 저장"""
-        checkpoint = {
-            "phase": phase,
-            "timestamp": datetime.now(),
-            "state": state,
-            "checkpoint_id": f"{phase}_{len(self.checkpoints)}"
-        }
-        self.checkpoints.append(checkpoint)
+    def set_current_phase(self, phase: str):
+        """현재 실행 중인 Phase 설정"""
+        self.current_phase = phase
+        if phase not in self.phase_states:
+            self.phase_states[phase] = {}
     
-    def restore_checkpoint(self, checkpoint_id: str) -> Optional[Dict[str, Any]]:
-        """체크포인트 복원"""
-        for checkpoint in self.checkpoints:
-            if checkpoint["checkpoint_id"] == checkpoint_id:
-                return checkpoint["state"]
-        return None
+    def update_phase_state(self, phase: str, state_updates: Dict[str, Any]):
+        """특정 Phase의 상태 업데이트"""
+        if phase not in self.phase_states:
+            self.phase_states[phase] = {}
+        self.phase_states[phase].update(state_updates)
     
-    def persist_to_disk(self, file_path: str):
+    def mark_phase_completed(self, phase: str):
+        """Phase 완료 표시"""
+        self.update_phase_state(phase, {
+            "completed": True, 
+            "completed_at": datetime.now().isoformat()
+        })
+    
+    def is_phase_completed(self, phase: str) -> bool:
+        """Phase 완료 여부 확인"""
+        return self.phase_states.get(phase, {}).get("completed", False)
+    
+    async def persist_to_disk(self, file_path: str):
         """디스크에 상태 저장"""
         state_data = {
             "session_id": self.session_id,
             "start_time": self.start_time.isoformat(),
             "current_phase": self.current_phase,
             "phase_states": self.phase_states,
-            "global_state": self.global_state,
-            "checkpoints": [
-                {
-                    **cp,
-                    "timestamp": cp["timestamp"].isoformat()
-                }
-                for cp in self.checkpoints
-            ]
+            "global_state": self.global_state
         }
         
-        with open(file_path, 'w') as f:
-            json.dump(state_data, f, indent=2)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
 ```
 
 ## 에이전트 안전성 및 제약
