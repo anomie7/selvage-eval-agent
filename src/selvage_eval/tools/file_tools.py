@@ -35,9 +35,6 @@ class ReadFileTool(Tool):
         Returns:
             bool: 유효성 검증 결과
         """
-        if not isinstance(params, dict):
-            return False
-            
         # 필수 파라미터 확인
         if 'file_path' not in params:
             return False
@@ -75,8 +72,6 @@ class ReadFileTool(Tool):
         Returns:
             ToolResult: 파일 내용 및 메타데이터
         """
-        start_time = time.time()
-        
         try:
             # 파일 존재 확인
             if not os.path.exists(file_path):
@@ -84,7 +79,6 @@ class ReadFileTool(Tool):
                     success=False,
                     data=None,
                     error_message=f"File not found: {file_path}",
-                    execution_time=time.time() - start_time
                 )
             
             # 파일 크기 확인
@@ -94,7 +88,6 @@ class ReadFileTool(Tool):
                     success=False,
                     data=None,
                     error_message=f"File too large: {file_size_mb:.1f}MB > {max_size_mb}MB",
-                    execution_time=time.time() - start_time
                 )
             
             # 파일 읽기
@@ -110,7 +103,6 @@ class ReadFileTool(Tool):
                         success=False,
                         data=None,
                         error_message=f"Invalid JSON format: {str(e)}",
-                        execution_time=time.time() - start_time
                     )
             
             return ToolResult(
@@ -121,7 +113,6 @@ class ReadFileTool(Tool):
                     "file_size_bytes": os.path.getsize(file_path),
                     "encoding": encoding
                 },
-                execution_time=time.time() - start_time
             )
             
         except UnicodeDecodeError:
@@ -129,14 +120,12 @@ class ReadFileTool(Tool):
                 success=False,
                 data=None,
                 error_message=f"Unable to decode file with encoding: {encoding}",
-                execution_time=time.time() - start_time
             )
         except Exception as e:
             return ToolResult(
                 success=False,
                 data=None,
                 error_message=f"Failed to read file: {str(e)}",
-                execution_time=time.time() - start_time
             )
 
 
@@ -164,9 +153,6 @@ class WriteFileTool(Tool):
         Returns:
             bool: 유효성 검증 결과
         """
-        if not isinstance(params, dict):
-            return False
-            
         # 필수 파라미터 확인
         required_params = ['file_path', 'content']
         for param in required_params:
@@ -211,7 +197,6 @@ class WriteFileTool(Tool):
         Returns:
             ToolResult: 파일 쓰기 결과
         """
-        start_time = time.time()        
         try:
             # 디렉토리 생성 (필요시)
             if create_dirs:
@@ -232,7 +217,6 @@ class WriteFileTool(Tool):
                     "bytes_written": len(content.encode(encoding)) if isinstance(content, str) else len(str(content).encode(encoding)),
                     "encoding": encoding
                 },
-                execution_time=time.time() - start_time
             )
             
         except Exception as e:
@@ -240,7 +224,6 @@ class WriteFileTool(Tool):
                 success=False,
                 data=None,
                 error_message=f"Failed to write file: {str(e)}",
-                execution_time=time.time() - start_time
             )
 
 
@@ -268,9 +251,6 @@ class FileExistsTool(Tool):
         Returns:
             bool: 유효성 검증 결과
         """
-        if not isinstance(params, dict):
-            return False
-            
         # 필수 파라미터 확인
         if 'file_path' not in params:
             return False
@@ -294,7 +274,6 @@ class FileExistsTool(Tool):
         Returns:
             ToolResult: 파일 존재 여부 및 정보
         """
-        start_time = time.time()
         try:
             exists = os.path.exists(file_path)
             is_file = os.path.isfile(file_path) if exists else False
@@ -308,7 +287,6 @@ class FileExistsTool(Tool):
                     "is_directory": is_dir,
                     "file_path": file_path
                 },
-                execution_time=time.time() - start_time
             )
             
         except Exception as e:
@@ -316,5 +294,4 @@ class FileExistsTool(Tool):
                 success=False,
                 data=None,
                 error_message=f"Failed to check file existence: {str(e)}",
-                execution_time=time.time() - start_time
             )

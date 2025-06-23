@@ -72,7 +72,7 @@ class Tool(ABC):
         """매개변수 스키마 (JSON Schema 형식)"""
         pass
     
-    
+    @abstractmethod
     def validate_parameters(self, params: Dict[str, Any]) -> bool:
         """매개변수 유효성 검증
         
@@ -82,9 +82,7 @@ class Tool(ABC):
         Returns:
             bool: 유효성 검증 결과
         """
-        # TODO: JSON Schema 기반 검증 구현
-        # 현재는 파라미터가 존재하면 True 반환
-        return params is not None
+        pass
     
     @abstractmethod
     def execute(self, **kwargs) -> ToolResult:

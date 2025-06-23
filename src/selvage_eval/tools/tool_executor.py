@@ -4,6 +4,7 @@ LLM이 반환한 tool_calls를 파싱하여 타입 체크 후 실제 도구 함�
 """
 
 import inspect
+import time
 from typing import Any, Dict, List, Type, get_type_hints, Union
 
 from selvage_eval.tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
@@ -27,7 +28,7 @@ class ToolExecutor:
         Raises:
             ValueError: 등록되지 않은 도구이거나 파라미터 검증 실패
         """
-        
+        start_time = time.time()
         try:
             tool = ToolGenerator().generate_tool(tool_name, parameters)
             
@@ -36,17 +37,19 @@ class ToolExecutor:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error_message=f"Invalid parameters for tool '{tool_name}': {parameters}"
+                    error_message=f"Invalid parameters for tool '{tool_name}': {parameters}",
                 )
             
             result = tool.execute(**parameters)
+            result.execution_time = time.time() - start_time
             return result
         
         except Exception as e:
             return ToolResult(
                 success=False,
                 data=None,
-                error_message=f"Tool execution failed: {str(e)}"
+                error_message=f"Tool execution failed: {str(e)}",
+                execution_time=time.time() - start_time
             )
     
     def execute_multiple_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> List[ToolResult]:

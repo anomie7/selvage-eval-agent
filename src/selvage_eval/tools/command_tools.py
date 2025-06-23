@@ -58,9 +58,6 @@ class ExecuteSafeCommandTool(Tool):
         Returns:
             bool: 유효성 검증 결과
         """
-        if not isinstance(params, dict):
-            return False
-            
         # 필수 파라미터 확인
         if 'command' not in params:
             return False
@@ -98,7 +95,6 @@ class ExecuteSafeCommandTool(Tool):
         Returns:
             ToolResult: 명령어 실행 결과
         """
-        start_time = time.time()
         try:
             # 보안을 위한 명령어 검증
             if not self._validate_command_safety(command):
@@ -126,7 +122,6 @@ class ExecuteSafeCommandTool(Tool):
                     success=False,
                     data=None,
                     error_message=f"Command timed out after {timeout} seconds",
-                    execution_time=time.time() - start_time
                 )
             
             return ToolResult(
@@ -138,14 +133,12 @@ class ExecuteSafeCommandTool(Tool):
                     "command": command
                 },
                 error_message=stderr if returncode != 0 and stderr else None,
-                execution_time=time.time() - start_time
             )
         except Exception as e:
             return ToolResult(
                 success=False,
                 data=None,
                 error_message=f"Failed to execute command: {str(e)}",
-                execution_time=time.time() - start_time
             )
     
     def _validate_command_safety(self, command: str) -> bool:
@@ -224,9 +217,6 @@ class ListDirectoryTool(Tool):
         Returns:
             bool: 유효성 검증 결과
         """
-        if not isinstance(params, dict):
-            return False
-            
         # 필수 파라미터 확인
         if 'directory_path' not in params:
             return False
