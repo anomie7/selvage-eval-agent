@@ -58,6 +58,10 @@ Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 두 가
    - "모델별 성능 비교해줘"
    - "어떤 모델이 가장 좋아?"
 
+6. **대화형 모드 특수 명령어 (새로 추가됨)**
+   - "/clear": 대화 히스토리 초기화
+   - "/context": 현재 컨텍스트 사용량 확인
+
 #### LLM-Based Query Analysis System
 
 현대적 에이전트 패턴을 적용하여 LLM이 사용자 쿼리를 분석하고 실행 계획을 수립합니다:
@@ -202,14 +206,16 @@ class SelvageEvaluationAgent:
         self.llm = self._initialize_llm()  # Query Planning용 LLM
         self.is_interactive_mode = False
     
-    async def handle_user_message(self, message: str) -> str:
+    def handle_user_message(self, message: str) -> str:
         """
-        현대적 에이전트 패턴으로 사용자 메시지 처리
+        개선된 대화형 메시지 처리 (대화 히스토리 관리 포함)
         
         Flow:
-        1. LLM이 쿼리 분석 및 실행 계획 수립
-        2. 계획에 따라 도구들 실행  
-        3. 도구 결과를 바탕으로 LLM이 최종 응답 생성
+        1. 특수 명령어 처리 (/clear, /context)
+        2. 대화 히스토리를 포함한 실행 계획 수립
+        3. 계획에 따라 도구들 실행  
+        4. 도구 결과를 바탕으로 최종 응답 생성
+        5. 대화 히스토리에 추가
         """
         try:
             # 1. LLM 기반 쿼리 분석 및 실행 계획 수립
@@ -1151,6 +1157,11 @@ class SessionState:
         self.current_phase = None
         self.phase_states = {}
         self.global_state = {}
+        
+        # 대화 히스토리 관리 (추가됨)
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.context_window_size: int = 8000  # 토큰 기준
+        self.max_history_entries: int = 50    # 최대 대화 수
     
     def set_current_phase(self, phase: str):
         """현재 실행 중인 Phase 설정"""
@@ -1174,6 +1185,42 @@ class SessionState:
     def is_phase_completed(self, phase: str) -> bool:
         """Phase 완료 여부 확인"""
         return self.phase_states.get(phase, {}).get("completed", False)
+    
+    def add_conversation_turn(self, user_message: str, assistant_response: str, 
+                            tool_results: Optional[List[Dict[str, Any]]] = None) -> None:
+        """대화 턴 추가"""
+        turn = {
+            "timestamp": datetime.now().isoformat(),
+            "user_message": user_message,
+            "assistant_response": assistant_response,
+            "tool_results": tool_results or [],
+            "turn_id": len(self.conversation_history) + 1
+        }
+        self.conversation_history.append(turn)
+        
+        # 최대 대화 수 제한
+        if len(self.conversation_history) > self.max_history_entries:
+            self.conversation_history = self.conversation_history[-self.max_history_entries:]
+    
+    def get_conversation_context(self) -> List[Dict[str, Any]]:
+        """현재 컨텍스트 반환 (토큰 제한 고려)"""
+        # 토큰 제한을 고려한 컨텍스트 반환 로직
+        return self.conversation_history[-10:]  # 간소화된 구현
+    
+    def clear_conversation_history(self):
+        """대화 히스토리 초기화"""
+        self.conversation_history.clear()
+    
+    def get_context_stats(self) -> Dict[str, Any]:
+        """컨텍스트 사용량 통계"""
+        return {
+            "total_conversation_turns": len(self.conversation_history),
+            "context_turns": min(10, len(self.conversation_history)),
+            "current_context_tokens": len(str(self.conversation_history)) // 4,  # 근사치
+            "max_context_tokens": self.context_window_size,
+            "context_utilization": min(1.0, len(self.conversation_history) / 10),
+            "max_history_entries": self.max_history_entries
+        }
     
     async def persist_to_disk(self, file_path: str):
         """디스크에 상태 저장"""

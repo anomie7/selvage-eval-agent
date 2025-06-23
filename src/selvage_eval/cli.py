@@ -35,9 +35,9 @@ def interactive_mode(agent: SelvageEvaluationAgent) -> None:
     print("종료하려면 'quit' 또는 'exit'를 입력하세요.")
     print("-" * 50)
     
-    # 세션 시작
-    session_id = agent.start_session()
-    print(f"[SESSION] 새 세션을 시작했습니다: {session_id}")
+    # 세션 정보 표시 (이미 생성자에서 초기화됨)
+    session_id = agent.session_state.session_id
+    print(f"[SESSION] 세션이 준비되었습니다: {session_id}")
     print()
     
     while True:

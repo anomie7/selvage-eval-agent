@@ -31,15 +31,21 @@ class SelvageEvaluationAgent:
             config: Evaluation configuration
         """
         self.config = config
-        self.session_state: Optional[SessionState] = None
+        self.session_state = SessionState()  # 즉시 초기화
         self.current_phase: Optional[str] = None
         self.is_interactive_mode = False
         
-        logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model}")
+        # 초기 세션 메타데이터 저장
+        self._save_session_metadata()
+        
+        # 자동 영속화 시작
+        self.session_state.auto_persist(self.config.evaluation.output_dir)
+        
+        logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model} (session: {self.session_state.session_id})")
     
     
-    def start_session(self, session_id: Optional[str] = None) -> str:
-        """Start new evaluation session
+    def reset_session(self, session_id: Optional[str] = None) -> str:
+        """Reset to new evaluation session
         
         Args:
             session_id: Session ID (auto-generated if None)
@@ -47,25 +53,26 @@ class SelvageEvaluationAgent:
         Returns:
             Created session ID
         """
+        old_session_id = self.session_state.session_id
         self.session_state = SessionState(session_id)
         
-        # Save session metadata
+        # 새 세션 메타데이터 저장 및 자동 영속화 재시작
         self._save_session_metadata()
-        
-        # Start auto-persistence
         self.session_state.auto_persist(self.config.evaluation.output_dir)
         
-        logger.info(f"Started evaluation session: {self.session_state.session_id}")
+        logger.info(f"Reset from session {old_session_id} to new session: {self.session_state.session_id}")
         return self.session_state.session_id
     
     def handle_user_message(self, message: str) -> str:
         """
-        Handle user message using modern agent pattern
+        개선된 대화형 메시지 처리
         
         Flow:
-        1. LLM analyzes query and creates execution plan
-        2. Execute tools according to plan  
-        3. LLM generates final response based on tool results
+        1. 특수 명령어 처리 (/clear, /context)
+        2. 대화 히스토리를 포함한 실행 계획 수립
+        3. 계획에 따라 도구들 실행  
+        4. 도구 결과를 바탕으로 최종 응답 생성
+        5. 대화 히스토리에 추가
         
         Args:
             message: User message
@@ -73,20 +80,27 @@ class SelvageEvaluationAgent:
         Returns:
             Response result
         """
-        if not self.session_state:
-            self.start_session()
-        
         self.is_interactive_mode = True
         
+        # 특수 명령어 처리
+        if message.startswith('/'):
+            return self._handle_special_command(message)
+        
         try:
-            # 1. LLM-based query analysis and execution planning
+            # 1. 대화 히스토리를 포함한 실행 계획 수립
             plan = self.plan_execution(message)
             
-            # 2. Safety validation
+            # 2. 안전성 검증
             if not self._validate_plan_safety(plan):
-                return f"Cannot execute requested task for security reasons: {plan.safety_check}"
+                response = f"보안상 실행할 수 없습니다: {plan.safety_check}"
+                # 오류 마저 히스토리에 기록
+                self.session_state.add_conversation_turn(
+                    user_message=message,
+                    assistant_response=response
+                )
+                return response
             
-            # 3. Execute tools according to plan
+            # 3. 계획에 따라 도구들 실행
             tool_results = []
             for tool_call in plan.tool_calls:
                 result = self.execute_tool(tool_call.tool, tool_call.params)
@@ -96,12 +110,29 @@ class SelvageEvaluationAgent:
                     "rationale": tool_call.rationale
                 })
             
-            # 4. Generate final response based on tool results
-            return self.generate_response(message, plan, tool_results)
+            # 4. 도구 결과를 바탕으로 최종 응답 생성
+            response = self.generate_response(message, plan, tool_results)
+            
+            # 5. 대화 히스토리에 추가
+            self.session_state.add_conversation_turn(
+                user_message=message,
+                assistant_response=response,
+                tool_results=tool_results
+            )
+            
+            return response
             
         except Exception as e:
             logger.error(f"Error handling user message: {e}")
-            return f"Error occurred while processing message: {str(e)}"
+            error_response = f"메시지 처리 중 오류가 발생했습니다: {str(e)}"
+            
+            # 오류 상황도 히스토리에 기록
+            self.session_state.add_conversation_turn(
+                user_message=message,
+                assistant_response=error_response
+            )
+            
+            return error_response
     
     def plan_execution(self, user_query: str) -> ExecutionPlan:
         """Query analysis and execution planning via LLM
@@ -112,26 +143,36 @@ class SelvageEvaluationAgent:
         Returns:
             Execution plan
         """
-        # Collect current state information
+        # 현재 상태 정보 수집
         current_state = self._analyze_current_state()
         
-        # TODO: Implement actual LLM call
-        # For now, use simple rule-based planning
-        plan = self._create_simple_plan(user_query, current_state)
+        # 대화 히스토리 컨텍스트 수집
+        conversation_context = self.session_state.get_conversation_context()
         
-        logger.debug(f"Created execution plan for query: {user_query[:50]}...")
+        # TODO: Implement actual LLM call with conversation history
+        # For now, use simple rule-based planning with history awareness
+        plan = self._create_simple_plan(user_query, current_state, conversation_context)
+        
+        logger.debug(f"Created execution plan for query: {user_query[:50]}... (with {len(conversation_context)} context turns)")
         return plan
     
-    def _create_simple_plan(self, user_query: str, current_state: Dict[str, Any]) -> ExecutionPlan:
-        """Create simple rule-based execution plan (temporary implementation)
+    def _create_simple_plan(self, user_query: str, current_state: Dict[str, Any], 
+                          conversation_context: Optional[List[Dict[str, Any]]] = None) -> ExecutionPlan:
+        """버번 법칙 기반 실행 계획 생성 (임시 구현)
         
         Args:
-            user_query: User query
-            current_state: Current state
+            user_query: 사용자 질문
+            current_state: 현재 상태
+            conversation_context: 대화 컨텍스트
             
         Returns:
-            Execution plan
+            실행 계획
         """
+        
+        # 대화 컨텍스트 고려 (TODO: 향후 LLM에서 활용)
+        context_info = ""
+        if conversation_context:
+            context_info = f" (이전 {len(conversation_context)}개 대화 참고)"
         
         query_lower = user_query.lower()
         
@@ -149,7 +190,7 @@ class SelvageEvaluationAgent:
                     )
                 ],
                 safety_check="Read-only operation, safe",
-                expected_outcome="Current session status information"
+                expected_outcome=f"Current session status information{context_info}"
             )
         
         # Commit list query
@@ -166,7 +207,7 @@ class SelvageEvaluationAgent:
                     )
                 ],
                 safety_check="Read-only operation, safe",
-                expected_outcome="Selected commit list"
+                expected_outcome=f"Selected commit list{context_info}"
             )
         
         # Default directory query
@@ -183,27 +224,33 @@ class SelvageEvaluationAgent:
                     )
                 ],
                 safety_check="Read-only operation, safe",
-                expected_outcome="Output directory file list"
+                expected_outcome=f"Output directory file list{context_info}"
             )
     
     def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
-        """Generate final response to user based on tool execution results
+        """도구 실행 결과를 바탕으로 사용자에게 제공할 최종 응답 생성
         
         Args:
-            user_query: User query
-            plan: Execution plan
-            tool_results: Tool execution results
+            user_query: 사용자 질문
+            plan: 실행 계획
+            tool_results: 도구 실행 결과
             
         Returns:
-            User response
+            사용자 응답
         """
-        # TODO: Implement actual LLM-based response generation
-        # For now, use simple text response
+        # TODO: Implement actual LLM-based response generation with conversation history
+        # For now, use enhanced text response with context awareness
+        
+        # 대화 컨텍스트 고려
+        conversation_context = self.session_state.get_conversation_context()
+        context_info = ""
+        if len(conversation_context) > 0:
+            context_info = f" (이전 대화 {len(conversation_context)}개 참고)"
         
         if not tool_results:
-            return "No tools were executed."
+            return f"도구가 실행되지 않았습니다.{context_info}"
         
-        response_parts = [f"**{plan.intent_summary}**\n"]
+        response_parts = [f"**{plan.intent_summary}**{context_info}\n"]
         
         for result in tool_results:
             tool_name = result["tool"]
@@ -213,25 +260,25 @@ class SelvageEvaluationAgent:
                 if tool_name == "read_file":
                     content = tool_result.data.get("content", {})
                     if isinstance(content, dict):
-                        response_parts.append(f"[FILE] File content ({len(content)} items):")
+                        response_parts.append(f"[FILE] 파일 내용 ({len(content)}개 항목):")
                         for key, value in list(content.items())[:3]:  # Show first 3 only
                             response_parts.append(f"  - {key}: {str(value)[:100]}...")
                     else:
-                        response_parts.append(f"[FILE] File content: {str(content)[:200]}...")
+                        response_parts.append(f"[FILE] 파일 내용: {str(content)[:200]}...")
                         
                 elif tool_name == "list_directory":
                     files = tool_result.data.get("files", [])
                     dirs = tool_result.data.get("directories", [])
-                    response_parts.append("[DIRECTORY] Directory contents:")
-                    response_parts.append(f"  - Files: {len(files)} items")
-                    response_parts.append(f"  - Directories: {len(dirs)} items")
+                    response_parts.append("[DIRECTORY] 디렉토리 내용:")
+                    response_parts.append(f"  - 파일: {len(files)}개")
+                    response_parts.append(f"  - 디렉토리: {len(dirs)}개")
                     if files:
-                        response_parts.append(f"  - Main files: {', '.join(files[:5])}")
+                        response_parts.append(f"  - 주요 파일: {', '.join(files[:5])}")
                         
                 else:
-                    response_parts.append(f"[SUCCESS] {tool_name} execution completed")
+                    response_parts.append(f"[SUCCESS] {tool_name} 실행 완료")
             else:
-                response_parts.append(f"[ERROR] {tool_name} execution failed: {tool_result.error_message}")
+                response_parts.append(f"[ERROR] {tool_name} 실행 실패: {tool_result.error_message}")
         
         return "\n".join(response_parts)
     
@@ -280,6 +327,67 @@ class SelvageEvaluationAgent:
         
         return True
     
+    def _handle_special_command(self, command: str) -> str:
+        """특수 명령어 처리
+        
+        Args:
+            command: 입력된 명령어
+            
+        Returns:
+            명령어 처리 결과
+        """
+        command = command.strip().lower()
+        
+        if command == '/clear':
+            return self._clear_conversation()
+        elif command == '/context':
+            return self._show_context_info()
+        else:
+            return f"알 수 없는 명령어입니다: {command}\n"\
+                   f"사용 가능한 명령어:\n"\
+                   f"  /clear  - 대화 히스토리 초기화\n"\
+                   f"  /context - 컨텍스트 정보 표시"
+    
+    def _clear_conversation(self) -> str:
+        """대화 히스토리 초기화
+        
+        Returns:
+            초기화 결과 메시지
+        """
+        # 현재 대화 수 확인
+        context_stats = self.session_state.get_context_stats()
+        total_turns = context_stats["total_conversation_turns"]
+        
+        # 대화 히스토리 초기화
+        self.session_state.clear_conversation_history()
+        
+        return f"대화 히스토리가 초기화되었습니다. ({total_turns}개 대화 삭제)"
+    
+    def _show_context_info(self) -> str:
+        """컨텍스트 정보 표시
+        
+        Returns:
+            컨텍스트 정보 메시지
+        """
+        stats = self.session_state.get_context_stats()
+        
+        utilization_percent = stats["context_utilization"] * 100
+        
+        info_parts = [
+            "**컨텍스트 사용량 정보**",
+            f"전체 대화 수: {stats['total_conversation_turns']}개",
+            f"현재 컨텍스트 대화 수: {stats['context_turns']}개",
+            f"현재 컨텍스트 토큰 수: {stats['current_context_tokens']:,}",
+            f"최대 컨텍스트 토큰 수: {stats['max_context_tokens']:,}",
+            f"컨텍스트 사용률: {utilization_percent:.1f}%",
+            f"최대 히스토리 보존 수: {stats['max_history_entries']}개"
+        ]
+        
+        if utilization_percent > 80:
+            info_parts.append("\n⚠️  컨텍스트 사용률이 높습니다. '/clear' 명령어로 초기화를 고려해보세요.")
+        
+        return "\n".join(info_parts)
+    
     def execute_evaluation(self) -> Dict[str, Any]:
         """
         Execute evaluation process using agent approach
@@ -288,8 +396,7 @@ class SelvageEvaluationAgent:
         Returns:
             Evaluation result dictionary
         """
-        if not self.session_state:
-            self.start_session()
+        # SessionState는 항상 존재함 (생성자에서 초기화됨)
         
         logger.info("Starting automatic evaluation execution")
         
@@ -319,8 +426,7 @@ class SelvageEvaluationAgent:
         Returns:
             Current state dictionary
         """
-        if not self.session_state:
-            return {"error": "No active session"}
+        # SessionState는 항상 존재함
         
         state = {
             "session_id": self.session_state.session_id,
@@ -458,8 +564,7 @@ class SelvageEvaluationAgent:
         Returns:
             Final report dictionary
         """
-        if not self.session_state:
-            return {"error": "No session state"}
+        # SessionState는 항상 존재함
         
         return {
             "session_summary": self.session_state.get_session_summary(),
@@ -469,8 +574,7 @@ class SelvageEvaluationAgent:
     
     def _save_session_metadata(self) -> None:
         """Save session metadata"""
-        if not self.session_state:
-            return
+        # SessionState는 항상 존재함
         
         metadata = {
             "session_id": self.session_state.session_id,

@@ -12,6 +12,12 @@ import uuid
 import os
 import logging
 
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +37,12 @@ class SessionState:
         self.phase_states: Dict[str, Dict[str, Any]] = {}
         self.global_state: Dict[str, Any] = {}
         self._state_file: Optional[str] = None
+        
+        # 대화 히스토리 관리
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.context_window_size: int = 8000  # 토큰 기준
+        self.max_history_entries: int = 50    # 최대 대화 수
+        self._tokenizer = None  # tiktoken encoder (lazy loading)
         
         logger.info(f"Initialized session state: {self.session_id}")
     
@@ -134,6 +146,9 @@ class SessionState:
                 "current_phase": self.current_phase,
                 "phase_states": self.phase_states,
                 "global_state": self.global_state,
+                "conversation_history": self.conversation_history,
+                "context_window_size": self.context_window_size,
+                "max_history_entries": self.max_history_entries
             }
             
             # 디렉토리 생성 (필요시)
@@ -170,6 +185,11 @@ class SessionState:
             session.phase_states = state_data["phase_states"]
             session.global_state = state_data["global_state"]
             session._state_file = file_path
+            
+            # 대화 히스토리 복원 (이전 버전 호환성 고려)
+            session.conversation_history = state_data.get("conversation_history", [])
+            session.context_window_size = state_data.get("context_window_size", 8000)
+            session.max_history_entries = state_data.get("max_history_entries", 50)
             
             
             logger.info(f"Loaded session state from: {file_path}")
@@ -208,6 +228,130 @@ class SessionState:
         self._auto_persist_task = loop.create_task(persist_loop())
         logger.info(f"Started auto-persist (interval: {interval}s)")
     
+    def add_conversation_turn(self, user_message: str, assistant_response: str, 
+                            tool_results: Optional[List[Dict[str, Any]]] = None) -> None:
+        """대화 턴 추가
+        
+        Args:
+            user_message: 사용자 메시지
+            assistant_response: 어시스턴트 응답
+            tool_results: 도구 실행 결과 (선택사항)
+        """
+        turn = {
+            "timestamp": datetime.now().isoformat(),
+            "user_message": user_message,
+            "assistant_response": assistant_response,
+            "tool_results": tool_results or [],
+            "turn_id": len(self.conversation_history) + 1
+        }
+        
+        self.conversation_history.append(turn)
+        
+        # 최대 대화 수 제한
+        if len(self.conversation_history) > self.max_history_entries:
+            self.conversation_history = self.conversation_history[-self.max_history_entries:]
+            logger.info(f"Trimmed conversation history to {self.max_history_entries} entries")
+        
+        logger.debug(f"Added conversation turn {turn['turn_id']}")
+    
+    def get_conversation_context(self, include_tool_results: bool = False) -> List[Dict[str, Any]]:
+        """현재 컨텍스트 반환 (토큰 제한 고려)
+        
+        Args:
+            include_tool_results: 도구 실행 결과 포함 여부
+            
+        Returns:
+            컨텍스트에 포함할 대화 히스토리
+        """
+        if not self.conversation_history:
+            return []
+        
+        # 토큰 계산을 위한 인코더 준비
+        if self._tokenizer is None and TIKTOKEN_AVAILABLE:
+            try:
+                self._tokenizer = tiktoken.encoding_for_model("gpt-4")
+            except Exception as e:
+                # tiktoken 사용 불가시 대략적인 계산
+                logger.debug(f"Failed to initialize tiktoken encoder: {e}")
+                self._tokenizer = None
+        
+        context_turns = []
+        current_tokens = 0
+        
+        # 최신 대화부터 역순으로 추가
+        for turn in reversed(self.conversation_history):
+            turn_context = {
+                "user_message": turn["user_message"],
+                "assistant_response": turn["assistant_response"],
+                "timestamp": turn["timestamp"]
+            }
+            
+            if include_tool_results and turn["tool_results"]:
+                turn_context["tool_results"] = turn["tool_results"]
+            
+            # 토큰 수 계산
+            turn_tokens = self._estimate_tokens(turn_context)
+            
+            if current_tokens + turn_tokens > self.context_window_size:
+                break
+            
+            context_turns.insert(0, turn_context)
+            current_tokens += turn_tokens
+        
+        logger.debug(f"Context includes {len(context_turns)} turns ({current_tokens} tokens)")
+        return context_turns
+    
+    def clear_conversation_history(self) -> None:
+        """대화 히스토리 초기화"""
+        conversation_count = len(self.conversation_history)
+        self.conversation_history.clear()
+        logger.info(f"Cleared conversation history ({conversation_count} turns removed)")
+    
+    def get_context_stats(self) -> Dict[str, Any]:
+        """컨텍스트 사용량 통계
+        
+        Returns:
+            컨텍스트 통계 정보
+        """
+        total_turns = len(self.conversation_history)
+        context_turns = self.get_conversation_context()
+        
+        # 현재 컨텍스트의 토큰 수 계산
+        current_tokens = sum(self._estimate_tokens(turn) for turn in context_turns)
+        
+        return {
+            "total_conversation_turns": total_turns,
+            "context_turns": len(context_turns),
+            "current_context_tokens": current_tokens,
+            "max_context_tokens": self.context_window_size,
+            "context_utilization": current_tokens / self.context_window_size if self.context_window_size > 0 else 0,
+            "max_history_entries": self.max_history_entries
+        }
+    
+    def _estimate_tokens(self, content: Any) -> int:
+        """컨텐츠의 토큰 수 추정
+        
+        Args:
+            content: 토큰 수를 계산할 컨텐츠
+            
+        Returns:
+            추정된 토큰 수
+        """
+        text = json.dumps(content, ensure_ascii=False) if isinstance(content, dict) else str(content)
+        
+        if self._tokenizer:
+            try:
+                return len(self._tokenizer.encode(text))
+            except Exception as e:
+                logger.debug(f"Failed to encode text with tiktoken: {e}")
+                pass
+        
+        # 대략적인 추정 (영어: 4글자당 1토큰, 한국어: 2글자당 1토큰)
+        korean_chars = sum(1 for c in text if ord(c) > 127)
+        english_chars = len(text) - korean_chars
+        
+        return (english_chars // 4) + (korean_chars // 2)
+    
     def get_session_summary(self) -> Dict[str, Any]:
         """세션 요약 정보 반환
         
@@ -216,6 +360,7 @@ class SessionState:
         """
         duration = datetime.now() - self.start_time
         completed_phases = self.get_completed_phases()
+        context_stats = self.get_context_stats()
         
         return {
             "session_id": self.session_id,
@@ -223,4 +368,5 @@ class SessionState:
             "duration_seconds": duration.total_seconds(),
             "current_phase": self.current_phase,
             "completed_phases": completed_phases,
+            "conversation_stats": context_stats
         }
