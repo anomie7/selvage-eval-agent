@@ -42,7 +42,7 @@ def interactive_mode(agent: SelvageEvaluationAgent) -> None:
     
     while True:
         try:
-            user_input = input("👤 질문: ").strip()
+            user_input = input("질문: ").strip()
             
             if user_input.lower() in ['quit', 'exit', '종료']:
                 print("[EXIT] 세션을 종료합니다.")

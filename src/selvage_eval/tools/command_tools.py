@@ -8,9 +8,10 @@ import subprocess
 import re
 import shlex
 import os
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, Optional
 
-from .base import Tool, ToolResult
+from .base import Tool, ToolResult, generate_parameters_schema_from_hints
 
 
 class ExecuteSafeCommandTool(Tool):
@@ -46,35 +47,58 @@ class ExecuteSafeCommandTool(Tool):
     
     @property
     def parameters_schema(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string", 
-                    "description": "실행할 터미널 명령어"
-                },
-                "cwd": {
-                    "type": "string", 
-                    "description": "명령어 실행 디렉토리 (선택사항)"
-                },
-                "timeout": {
-                    "type": "integer", 
-                    "description": "타임아웃 (초, 기본값: 60)"
-                },
-                "capture_output": {
-                    "type": "boolean", 
-                    "description": "출력 캡처 여부 (기본값: true)"
-                }
-            },
-            "required": ["command"]
-        }
+        return generate_parameters_schema_from_hints(self.execute)
     
-    def execute(self, **kwargs) -> ToolResult:
-        command = kwargs["command"]
-        cwd = kwargs.get("cwd", None)
-        timeout = kwargs.get("timeout", 60)
-        capture_output = kwargs.get("capture_output", True)
+    def validate_parameters(self, params: Dict[str, Any]) -> bool:
+        """파라미터 유효성 검증
         
+        Args:
+            params: 검증할 파라미터 딕셔너리
+            
+        Returns:
+            bool: 유효성 검증 결과
+        """
+        if not isinstance(params, dict):
+            return False
+            
+        # 필수 파라미터 확인
+        if 'command' not in params:
+            return False
+            
+        # command 타입 확인
+        if not isinstance(params['command'], str):
+            return False
+            
+        # command 빈 문자열 확인
+        if not params['command'].strip():
+            return False
+            
+        # 선택적 파라미터 타입 확인
+        if 'cwd' in params and params['cwd'] is not None and not isinstance(params['cwd'], str):
+            return False
+            
+        if 'timeout' in params and not isinstance(params['timeout'], int):
+            return False
+            
+        if 'capture_output' in params and not isinstance(params['capture_output'], bool):
+            return False
+            
+        return True
+    
+    def execute(self, command: str, cwd: Optional[str] = None, 
+                timeout: int = 60, capture_output: bool = True) -> ToolResult:
+        """제한된 안전 명령어를 실행합니다
+        
+        Args:
+            command: 실행할 터미널 명령어
+            cwd: 명령어 실행 디렉토리 (선택사항)
+            timeout: 타임아웃 (초, 기본값: 60)
+            capture_output: 출력 캡처 여부 (기본값: true)
+            
+        Returns:
+            ToolResult: 명령어 실행 결과
+        """
+        start_time = time.time()
         try:
             # 보안을 위한 명령어 검증
             if not self._validate_command_safety(command):
@@ -101,7 +125,8 @@ class ExecuteSafeCommandTool(Tool):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error_message=f"Command timed out after {timeout} seconds"
+                    error_message=f"Command timed out after {timeout} seconds",
+                    execution_time=time.time() - start_time
                 )
             
             return ToolResult(
@@ -112,13 +137,15 @@ class ExecuteSafeCommandTool(Tool):
                     "stderr": stderr,
                     "command": command
                 },
-                error_message=stderr if returncode != 0 and stderr else None
+                error_message=stderr if returncode != 0 and stderr else None,
+                execution_time=time.time() - start_time
             )
         except Exception as e:
             return ToolResult(
                 success=False,
                 data=None,
-                error_message=f"Failed to execute command: {str(e)}"
+                error_message=f"Failed to execute command: {str(e)}",
+                execution_time=time.time() - start_time
             )
     
     def _validate_command_safety(self, command: str) -> bool:
@@ -186,37 +213,62 @@ class ListDirectoryTool(Tool):
     
     @property
     def parameters_schema(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "directory_path": {
-                    "type": "string", 
-                    "description": "나열할 디렉토리 경로"
-                },
-                "recursive": {
-                    "type": "boolean", 
-                    "description": "하위 디렉토리 재귀 탐색 여부 (기본값: false)"
-                },
-                "include_hidden": {
-                    "type": "boolean", 
-                    "description": "숨겨진 파일 포함 여부 (기본값: false)"
-                }
-            },
-            "required": ["directory_path"]
-        }
+        return generate_parameters_schema_from_hints(self.execute)
     
-    def execute(self, **kwargs) -> ToolResult:
-        directory_path = kwargs["directory_path"]
-        recursive = kwargs.get("recursive", False)
-        include_hidden = kwargs.get("include_hidden", False)
+    def validate_parameters(self, params: Dict[str, Any]) -> bool:
+        """파라미터 유효성 검증
         
+        Args:
+            params: 검증할 파라미터 딕셔너리
+            
+        Returns:
+            bool: 유효성 검증 결과
+        """
+        if not isinstance(params, dict):
+            return False
+            
+        # 필수 파라미터 확인
+        if 'directory_path' not in params:
+            return False
+            
+        # directory_path 타입 확인
+        if not isinstance(params['directory_path'], str):
+            return False
+            
+        # directory_path 빈 문자열 확인
+        if not params['directory_path'].strip():
+            return False
+            
+        # 선택적 파라미터 타입 확인
+        if 'recursive' in params and not isinstance(params['recursive'], bool):
+            return False
+            
+        if 'include_hidden' in params and not isinstance(params['include_hidden'], bool):
+            return False
+            
+        return True
+    
+    def execute(self, directory_path: str, recursive: bool = False,
+                include_hidden: bool = False) -> ToolResult:
+        """지정된 디렉토리의 파일과 하위 디렉토리 목록을 반환합니다
+        
+        Args:
+            directory_path: 나열할 디렉토리 경로
+            recursive: 하위 디렉토리 재귀 탐색 여부 (기본값: false)
+            include_hidden: 숨겨진 파일 포함 여부 (기본값: false)
+            
+        Returns:
+            ToolResult: 디렉토리 내용 목록
+        """
+        start_time = time.time()
         try:
             # 경로 접근 권한 확인
             if not self._validate_path_access(directory_path):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error_message=f"Access denied to directory: {directory_path}"
+                    error_message=f"Access denied to directory: {directory_path}",
+                    execution_time=time.time() - start_time
                 )
             
             # 디렉토리 존재 확인
@@ -224,14 +276,16 @@ class ListDirectoryTool(Tool):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error_message=f"Directory not found: {directory_path}"
+                    error_message=f"Directory not found: {directory_path}",
+                    execution_time=time.time() - start_time
                 )
             
             if not os.path.isdir(directory_path):
                 return ToolResult(
                     success=False,
                     data=None,
-                    error_message=f"Path is not a directory: {directory_path}"
+                    error_message=f"Path is not a directory: {directory_path}",
+                    execution_time=time.time() - start_time
                 )
             
             files = []
@@ -277,7 +331,8 @@ class ListDirectoryTool(Tool):
             return ToolResult(
                 success=False,
                 data=None,
-                error_message=f"Failed to list directory: {str(e)}"
+                error_message=f"Failed to list directory: {str(e)}",
+                execution_time=time.time() - start_time
             )
     
     def _validate_path_access(self, path: str) -> bool:

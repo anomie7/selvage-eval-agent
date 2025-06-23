@@ -11,7 +11,7 @@ class SelvageEvaluationAgent:
     
     def __init__(self, config: EvaluationConfig):
         self.config = config
-        self.tools = self._initialize_tools()
+        self.tool_executor = self._initialize_tool_executor()  # ToolExecutor 사용
         self.working_memory = WorkingMemory()
         self.session_state = SessionState()
         self.current_phase = None
@@ -35,10 +35,10 @@ class SelvageEvaluationAgent:
             if not self._validate_plan_safety(plan):
                 return f"요청하신 작업은 보안상 실행할 수 없습니다: {plan.safety_check}"
             
-            # 3. 계획에 따라 도구들 실행
+            # 3. 계획에 따라 도구들 실행 (ToolExecutor 사용)
             tool_results = []
             for tool_call in plan.tool_calls:
-                result = self.execute_tool(tool_call.tool, tool_call.params)
+                result = self.tool_executor.execute_tool_call(tool_call.tool, tool_call.params)
                 tool_results.append({
                     "tool": tool_call.tool,
                     "result": result,
@@ -123,11 +123,29 @@ class SelvageEvaluationAgent:
         
         return True
     
+    def _initialize_tool_executor(self) -> ToolExecutor:
+        """ToolExecutor 초기화 및 도구 등록"""
+        from .tools.tool_executor import ToolExecutor
+        from .tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
+        from .tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
+        
+        executor = ToolExecutor()
+        
+        # 모든 도구 등록
+        executor.register_tool(ExecuteSafeCommandTool())
+        executor.register_tool(ListDirectoryTool())
+        executor.register_tool(ReadFileTool())
+        executor.register_tool(WriteFileTool())
+        executor.register_tool(FileExistsTool())
+        
+        return executor
+    
     def _get_available_tools_description(self) -> str:
         """사용 가능한 도구들의 설명 반환"""
+        tools_info = self.tool_executor.get_available_tools()
         descriptions = []
-        for tool_name, tool in self.tools.items():
-            descriptions.append(f"- {tool_name}: {tool.description}")
+        for tool_name, tool_info in tools_info.items():
+            descriptions.append(f"- {tool_name}: {tool_info['description']}")
         return "\\n".join(descriptions)
 ```
 

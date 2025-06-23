@@ -119,6 +119,7 @@ class ToolResult:
 class Tool(ABC):
     """
     모든 도구의 기본 인터페이스
+    각 도구는 고유한 명시적 파라미터 시그니처를 가집니다.
     """
     
     @property
@@ -136,18 +137,85 @@ class Tool(ABC):
     @property
     @abstractmethod
     def parameters_schema(self) -> Dict[str, Any]:
-        """매개변수 스키마 (JSON Schema 형식)"""
+        """매개변수 스키마 (타입 힌트로부터 자동 생성)"""
         pass
     
-    @abstractmethod
-    async def execute(self, **kwargs) -> ToolResult:
-        """도구 실행"""
-        pass
+    # execute 메서드는 각 도구별로 고유한 파라미터 시그니처로 구현
+    # 예: def execute(self, command: str, timeout: int = 60) -> ToolResult
     
     def validate_parameters(self, params: Dict[str, Any]) -> bool:
         """매개변수 유효성 검증"""
-        # JSON Schema 기반 검증 구현
-        pass
+        # 타입 힌트 기반 검증으로 대체됨
+        return params is not None
+```
+
+## 타입 힌트 기반 자동 스키마 생성
+
+### 명시적 파라미터의 장점
+
+**기존 방식 (문제점):**
+```python
+def execute(self, **kwargs) -> ToolResult:
+    command = kwargs["command"]  # 타입 불명, 오타 가능
+    timeout = kwargs.get("timeout", 60)  # IDE 지원 없음
+```
+
+**현재 방식 (개선됨):**
+```python  
+def execute(self, command: str, cwd: Optional[str] = None, 
+           timeout: int = 60, capture_output: bool = True) -> ToolResult:
+    """제한된 안전 명령어를 실행합니다
+    
+    Args:
+        command: 실행할 터미널 명령어
+        cwd: 명령어 실행 디렉토리 (선택사항)
+        timeout: 타임아웃 (초, 기본값: 60)
+        capture_output: 출력 캡처 여부 (기본값: true)
+    """
+```
+
+### 자동 스키마 생성
+
+`generate_parameters_schema_from_hints()` 함수가 타입 힌트로부터 JSON Schema를 자동 생성:
+
+```python
+@property
+def parameters_schema(self) -> Dict[str, Any]:
+    return generate_parameters_schema_from_hints(self.execute)
+
+# 자동 생성 결과:
+# {
+#   "type": "object",
+#   "properties": {
+#     "command": {"type": "string", "description": "command 파라미터"},
+#     "cwd": {"type": "string", "description": "cwd 파라미터", "default": None},
+#     "timeout": {"type": "integer", "description": "timeout 파라미터", "default": 60},
+#     "capture_output": {"type": "boolean", "description": "capture_output 파라미터", "default": True}
+#   },
+#   "required": ["command"]
+# }
+```
+
+### LLM Tool Calls 실행
+
+`ToolExecutor` 클래스가 LLM tool_calls를 파싱하여 명시적 파라미터로 변환:
+
+```python
+# LLM이 반환한 tool_calls
+tool_calls = [
+    {
+        "tool": "execute_safe_command",
+        "parameters": {
+            "command": "jq '.commits[] | select(.repository==\"cline\")' data.json",
+            "timeout": 30
+        }
+    }
+]
+
+# ToolExecutor가 자동으로 타입 체크 및 변환 후 실행
+executor = ToolExecutor()
+executor.register_tool(ExecuteSafeCommandTool())
+results = executor.execute_multiple_tool_calls(tool_calls)
 ```
 
 ## 범용 도구 vs 특수 도구

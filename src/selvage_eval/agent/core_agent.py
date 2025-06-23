@@ -4,14 +4,13 @@ Single agent that manages the entire evaluation process for Selvage.
 Supports both interactive mode and automatic execution mode.
 """
 
-import json
 from typing import Dict, List, Any, Optional
 import logging
 
+from selvage_eval.tools.tool_executor import ToolExecutor
+
 from ..config.settings import EvaluationConfig
-from ..tools.base import Tool, ToolResult, ExecutionPlan
-from ..tools.file_tools import ReadFileTool, WriteFileTool, FileExistsTool
-from ..tools.command_tools import ExecuteSafeCommandTool, ListDirectoryTool
+from ..tools.base import ToolResult, ExecutionPlan
 from ..memory.working_memory import get_working_memory
 from ..memory.session_state import SessionState
 
@@ -31,7 +30,6 @@ class SelvageEvaluationAgent:
             config: Evaluation configuration
         """
         self.config = config
-        self.tools = self._initialize_tools()
         self.working_memory = get_working_memory()
         self.session_state: Optional[SessionState] = None
         self.current_phase: Optional[str] = None
@@ -39,22 +37,6 @@ class SelvageEvaluationAgent:
         
         logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model}")
     
-    def _initialize_tools(self) -> Dict[str, Tool]:
-        """Initialize tools
-        
-        Returns:
-            Dictionary mapping tool names to instances
-        """
-        tools = {
-            "read_file": ReadFileTool(),
-            "write_file": WriteFileTool(),
-            "file_exists": FileExistsTool(),
-            "execute_safe_command": ExecuteSafeCommandTool(),
-            "list_directory": ListDirectoryTool(),
-        }
-        
-        logger.debug(f"Initialized {len(tools)} tools")
-        return tools
     
     def start_session(self, session_id: Optional[str] = None) -> str:
         """Start new evaluation session
@@ -264,16 +246,9 @@ class SelvageEvaluationAgent:
         Returns:
             Tool execution result
         """
-        if tool_name not in self.tools:
-            return ToolResult(
-                success=False,
-                data=None,
-                error_message=f"Unknown tool: {tool_name}"
-            )
-        
-        tool = self.tools[tool_name]
         try:
-            result = tool.execute_with_timing(**params)
+            result = ToolExecutor().execute_tool_call(tool_name, params)
+            
             logger.debug(f"Executed tool {tool_name} in {result.execution_time:.2f}s")
             return result
         except Exception as e:
