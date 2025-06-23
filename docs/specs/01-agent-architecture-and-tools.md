@@ -15,6 +15,7 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 자동화 에이전트
 - **Python 3.10+** (타입 힌팅 필수)
 - **Google 스타일 독스트링** (한국어 주석)
 - **PEP 8 준수**
+- **토큰 계산**: Gemini count_token API 사용 (현재는 fallback 구현)
 
 ## Single Agent 아키텍처 패러다임
 
@@ -1160,7 +1161,7 @@ class SessionState:
         
         # 대화 히스토리 관리 (추가됨)
         self.conversation_history: List[Dict[str, Any]] = []
-        self.context_window_size: int = 8000  # 토큰 기준
+        self.context_window_size: int = 8000  # 토큰 기준 (Gemini count_token API 사용)
         self.max_history_entries: int = 50    # 최대 대화 수
     
     def set_current_phase(self, phase: str):
@@ -1204,7 +1205,8 @@ class SessionState:
     
     def get_conversation_context(self) -> List[Dict[str, Any]]:
         """현재 컨텍스트 반환 (토큰 제한 고려)"""
-        # 토큰 제한을 고려한 컨텍스트 반환 로직
+        # Gemini count_token API를 사용하여 토큰 제한을 고려한 컨텍스트 반환
+        # TODO: 실제 Gemini API 구현 후 정확한 토큰 계산
         return self.conversation_history[-10:]  # 간소화된 구현
     
     def clear_conversation_history(self):
@@ -1216,11 +1218,20 @@ class SessionState:
         return {
             "total_conversation_turns": len(self.conversation_history),
             "context_turns": min(10, len(self.conversation_history)),
-            "current_context_tokens": len(str(self.conversation_history)) // 4,  # 근사치
+            "current_context_tokens": self._count_tokens(self.conversation_history),  # Gemini API 사용
             "max_context_tokens": self.context_window_size,
             "context_utilization": min(1.0, len(self.conversation_history) / 10),
             "max_history_entries": self.max_history_entries
         }
+    
+    def _count_tokens(self, content: Any) -> int:
+        """Gemini count_token API를 사용한 토큰 수 계산
+        
+        TODO: 실제 Gemini API 구현
+        현재는 fallback 구현 사용
+        """
+        # 임시 구현 - 추후 실제 Gemini count_token API로 교체
+        return len(str(content)) // 4  # 대략적 추정
     
     async def persist_to_disk(self, file_path: str):
         """디스크에 상태 저장"""

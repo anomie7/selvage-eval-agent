@@ -12,11 +12,8 @@ import uuid
 import os
 import logging
 
-try:
-    import tiktoken
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
+# Gemini count_token API를 사용할 예정
+# TODO: 추후 실제 Gemini API로 구현
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +39,6 @@ class SessionState:
         self.conversation_history: List[Dict[str, Any]] = []
         self.context_window_size: int = 8000  # 토큰 기준
         self.max_history_entries: int = 50    # 최대 대화 수
-        self._tokenizer = None  # tiktoken encoder (lazy loading)
         
         logger.info(f"Initialized session state: {self.session_id}")
     
@@ -266,14 +262,7 @@ class SessionState:
         if not self.conversation_history:
             return []
         
-        # 토큰 계산을 위한 인코더 준비
-        if self._tokenizer is None and TIKTOKEN_AVAILABLE:
-            try:
-                self._tokenizer = tiktoken.encoding_for_model("gpt-4")
-            except Exception as e:
-                # tiktoken 사용 불가시 대략적인 계산
-                logger.debug(f"Failed to initialize tiktoken encoder: {e}")
-                self._tokenizer = None
+        # Gemini count_token API 사용 예정
         
         context_turns = []
         current_tokens = 0
@@ -290,7 +279,7 @@ class SessionState:
                 turn_context["tool_results"] = turn["tool_results"]
             
             # 토큰 수 계산
-            turn_tokens = self._estimate_tokens(turn_context)
+            turn_tokens = self._count_tokens(turn_context)
             
             if current_tokens + turn_tokens > self.context_window_size:
                 break
@@ -317,7 +306,7 @@ class SessionState:
         context_turns = self.get_conversation_context()
         
         # 현재 컨텍스트의 토큰 수 계산
-        current_tokens = sum(self._estimate_tokens(turn) for turn in context_turns)
+        current_tokens = sum(self._count_tokens(turn) for turn in context_turns)
         
         return {
             "total_conversation_turns": total_turns,
@@ -328,8 +317,21 @@ class SessionState:
             "max_history_entries": self.max_history_entries
         }
     
-    def _estimate_tokens(self, content: Any) -> int:
-        """컨텐츠의 토큰 수 추정
+    def _count_tokens(self, content: Any) -> int:
+        """Gemini count_token API를 사용한 토큰 수 계산
+        
+        Args:
+            content: 토큰 수를 계산할 컨텐츠
+            
+        Returns:
+            계산된 토큰 수
+        """
+        # TODO: 추후 실제 Gemini count_token API로 구현
+        # 현재는 임시 구현
+        return self._estimate_tokens_fallback(content)
+    
+    def _estimate_tokens_fallback(self, content: Any) -> int:
+        """토큰 수 대략적 추정 (fallback 구현)
         
         Args:
             content: 토큰 수를 계산할 컨텐츠
@@ -338,13 +340,6 @@ class SessionState:
             추정된 토큰 수
         """
         text = json.dumps(content, ensure_ascii=False) if isinstance(content, dict) else str(content)
-        
-        if self._tokenizer:
-            try:
-                return len(self._tokenizer.encode(text))
-            except Exception as e:
-                logger.debug(f"Failed to encode text with tiktoken: {e}")
-                pass
         
         # 대략적인 추정 (영어: 4글자당 1토큰, 한국어: 2글자당 1토큰)
         korean_chars = sum(1 for c in text if ord(c) > 127)
