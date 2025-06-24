@@ -20,7 +20,7 @@ structlog>=23.0.0
 # API 클라이언트들 (평가용)
 openai>=1.0.0
 anthropic>=0.7.0
-google-generativeai>=0.3.0
+google-genai
 
 # 데이터 처리
 pandas>=2.0.0

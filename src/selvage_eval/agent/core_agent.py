@@ -5,7 +5,10 @@ Supports both interactive mode and automatic execution mode.
 """
 
 from typing import Dict, List, Any, Optional
+import json
 import logging
+import os
+import re
 
 from selvage_eval.tools.execution_plan import ExecutionPlan
 from selvage_eval.tools.tool_call import ToolCall
@@ -14,6 +17,7 @@ from selvage_eval.tools.tool_result import ToolResult
 
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
+from ..llm.gemini_client import GeminiClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,21 @@ class SelvageEvaluationAgent:
         self.session_state = SessionState()  # 즉시 초기화
         self.current_phase: Optional[str] = None
         self.is_interactive_mode = False
+        
+        # LLM 클라이언트 초기화
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key is None:
+            raise ValueError("GEMINI_API_KEY is not set")
+        try:
+            self.gemini_client = GeminiClient(
+                api_key=api_key,
+                model_name=config.agent_model
+            )
+            logger.info(f"LLM integration enabled with model: {config.agent_model}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize LLM client, falling back to rule-based approach: {e}")
+            raise e
+
         
         # 초기 세션 메타데이터 저장
         self._save_session_metadata()
@@ -149,83 +168,39 @@ class SelvageEvaluationAgent:
         # 대화 히스토리 컨텍스트 수집
         conversation_context = self.session_state.get_conversation_context()
         
-        # TODO: Implement actual LLM call with conversation history
-        # For now, use simple rule-based planning with history awareness
-        plan = self._create_simple_plan(user_query, current_state, conversation_context)
+        # 프롬프트 구성
+        messages = [
+            {"role": "user", "content": f"""
+현재 상태: {json.dumps(current_state, ensure_ascii=False, indent=2)}
+
+사용자 쿼리: {user_query}
+            """}
+        ]
         
-        logger.debug(f"Created execution plan for query: {user_query[:50]}... (with {len(conversation_context)} context turns)")
-        return plan
-    
-    def _create_simple_plan(self, user_query: str, current_state: Dict[str, Any], 
-                          conversation_context: Optional[List[Dict[str, Any]]] = None) -> ExecutionPlan:
-        """버번 법칙 기반 실행 계획 생성 (임시 구현)
-        
-        Args:
-            user_query: 사용자 질문
-            current_state: 현재 상태
-            conversation_context: 대화 컨텍스트
+        # LLM 호출
+        try:
+            response = self.gemini_client.query(
+                messages=messages,
+                system_instruction=self._build_execution_plan_prompt(),
+            )
             
-        Returns:
-            실행 계획
-        """
-        
-        # 대화 컨텍스트 고려 (TODO: 향후 LLM에서 활용)
-        context_info = ""
-        if conversation_context:
-            context_info = f" (이전 {len(conversation_context)}개 대화 참고)"
-        
-        query_lower = user_query.lower()
-        
-        # Status query
-        if any(keyword in query_lower for keyword in ["status", "current", "progress"]):
-            return ExecutionPlan(
-                intent_summary="Query current status",
-                confidence=0.9,
-                parameters={},
-                tool_calls=[
-                    ToolCall(
-                        tool="read_file",
-                        params={"file_path": f"{self.config.evaluation.output_dir}/session_metadata.json", "as_json": True},
-                        rationale="Read session metadata"
-                    )
-                ],
-                safety_check="Read-only operation, safe",
-                expected_outcome=f"Current session status information{context_info}"
-            )
-        
-        # Commit list query
-        elif any(keyword in query_lower for keyword in ["commit"]):
-            return ExecutionPlan(
-                intent_summary="Query commit list",
-                confidence=0.8,
-                parameters={},
-                tool_calls=[
-                    ToolCall(
-                        tool="read_file",
-                        params={"file_path": f"{self.config.evaluation.output_dir}/meaningful_commits.json", "as_json": True},
-                        rationale="Read selected commit list"
-                    )
-                ],
-                safety_check="Read-only operation, safe",
-                expected_outcome=f"Selected commit list{context_info}"
-            )
-        
-        # Default directory query
-        else:
-            return ExecutionPlan(
-                intent_summary="Query output directory",
-                confidence=0.5,
-                parameters={},
-                tool_calls=[
-                    ToolCall(
-                        tool="list_directory",
-                        params={"directory_path": self.config.evaluation.output_dir},
-                        rationale="Check output directory contents"
-                    )
-                ],
-                safety_check="Read-only operation, safe",
-                expected_outcome=f"Output directory file list{context_info}"
-            )
+            # JSON 응답 파싱 및 ExecutionPlan 생성
+            response_data = self._extract_json_from_response(response)
+            plan = self._parse_execution_plan(response_data)
+            
+            logger.debug(f"Created LLM-based execution plan for query: {user_query[:50]}... (with {len(conversation_context)} context turns)")
+            return plan
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response as JSON: {e}")
+            raise e
+        except KeyError as e:
+            logger.error(f"Missing required field in LLM response: {e}")
+            raise e
+        except Exception as e:
+            logger.error(f"Error in plan_execution: {e}")
+            raise e
+    
     
     def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
         """도구 실행 결과를 바탕으로 사용자에게 제공할 최종 응답 생성
@@ -238,49 +213,33 @@ class SelvageEvaluationAgent:
         Returns:
             사용자 응답
         """
-        # TODO: Implement actual LLM-based response generation with conversation history
-        # For now, use enhanced text response with context awareness
-        
-        # 대화 컨텍스트 고려
+        # 대화 컨텍스트 수집
         conversation_context = self.session_state.get_conversation_context()
-        context_info = ""
-        if len(conversation_context) > 0:
-            context_info = f" (이전 대화 {len(conversation_context)}개 참고)"
         
-        if not tool_results:
-            return f"도구가 실행되지 않았습니다.{context_info}"
+        # 시스템 프롬프트 구성
+        system_prompt = self._build_response_system_prompt(conversation_context)
         
-        response_parts = [f"**{plan.intent_summary}**{context_info}\n"]
+        # 응답 생성 프롬프트 구성
+        response_prompt = self._build_response_generation_prompt(
+            user_query, plan, tool_results
+        )
         
-        for result in tool_results:
-            tool_name = result["tool"]
-            tool_result = result["result"]
+        messages = [{"role": "user", "content": response_prompt}]
+        
+        # LLM 호출
+        try:
+            response = self.gemini_client.query(
+                messages=messages,
+                system_instruction=system_prompt,
+            )
             
-            if tool_result.success:
-                if tool_name == "read_file":
-                    content = tool_result.data.get("content", {})
-                    if isinstance(content, dict):
-                        response_parts.append(f"[FILE] 파일 내용 ({len(content)}개 항목):")
-                        for key, value in list(content.items())[:3]:  # Show first 3 only
-                            response_parts.append(f"  - {key}: {str(value)[:100]}...")
-                    else:
-                        response_parts.append(f"[FILE] 파일 내용: {str(content)[:200]}...")
-                        
-                elif tool_name == "list_directory":
-                    files = tool_result.data.get("files", [])
-                    dirs = tool_result.data.get("directories", [])
-                    response_parts.append("[DIRECTORY] 디렉토리 내용:")
-                    response_parts.append(f"  - 파일: {len(files)}개")
-                    response_parts.append(f"  - 디렉토리: {len(dirs)}개")
-                    if files:
-                        response_parts.append(f"  - 주요 파일: {', '.join(files[:5])}")
-                        
-                else:
-                    response_parts.append(f"[SUCCESS] {tool_name} 실행 완료")
-            else:
-                response_parts.append(f"[ERROR] {tool_name} 실행 실패: {tool_result.error_message}")
-        
-        return "\n".join(response_parts)
+            logger.debug(f"Generated LLM-based response for query: {user_query[:50]}...")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in generate_response: {e}")
+            raise e
+    
     
     def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
         """Execute tool
@@ -597,3 +556,174 @@ class SelvageEvaluationAgent:
         })
         
         logger.info(f"Saved session metadata: {metadata_file}")
+    
+    def _build_execution_plan_prompt(
+        self,
+    ) -> str:
+        """실행 계획 생성용 프롬프트를 구성합니다"""
+        
+        prompt_parts = [
+            "당신은 Selvage 평가 에이전트입니다. 사용자의 요청을 분석하여 적절한 도구들을 선택하고 실행 계획을 수립해주세요.",
+            "",
+            "# 사용 가능한 도구들:",
+            "- read_file: 파일 내용 읽기 (params: file_path, as_json?)",
+            "- write_file: 파일 쓰기 (params: file_path, content, as_json?)",
+            "- file_exists: 파일 존재 여부 확인 (params: file_path)",
+            "- list_directory: 디렉토리 목록 보기 (params: directory_path)",
+            "- execute_safe_command: 안전한 명령어 실행 (params: command)",
+            "",
+            "다음 JSON 형식으로 실행 계획을 응답해주세요:",
+            "",
+            json.dumps({
+                "intent_summary": "사용자 의도 요약 (한국어)",
+                "confidence": 0.9,
+                "tool_calls": [
+                    {
+                        "tool": "도구명",
+                        "params": {"파라미터": "값"},
+                        "rationale": "도구 선택 이유"
+                    }
+                ],
+                "safety_check": "안전성 검토 결과",
+                "expected_outcome": "예상 결과"
+            }, ensure_ascii=False, indent=2)
+        ]
+        
+        return "\n".join(prompt_parts)
+    
+    def _parse_execution_plan(self, response_data: Dict[str, Any]) -> ExecutionPlan:
+        """LLM 응답을 ExecutionPlan 객체로 변환합니다"""
+        
+        # ToolCall 객체들 생성
+        tool_calls = []
+        for tool_call_data in response_data.get("tool_calls", []):
+            tool_call = ToolCall(
+                tool=tool_call_data["tool"],
+                params=tool_call_data["params"],
+                rationale=tool_call_data["rationale"]
+            )
+            tool_calls.append(tool_call)
+        
+        # ExecutionPlan 객체 생성
+        execution_plan = ExecutionPlan(
+            intent_summary=response_data["intent_summary"],
+            confidence=response_data["confidence"],
+            parameters=response_data.get("parameters", {}),
+            tool_calls=tool_calls,
+            safety_check=response_data["safety_check"],
+            expected_outcome=response_data["expected_outcome"]
+        )
+        
+        return execution_plan
+    
+    def _build_response_system_prompt(
+        self,
+        conversation_context: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        """응답 생성용 시스템 프롬프트를 구성합니다
+        
+        Args:
+            conversation_context: 대화 컨텍스트 (선택사항)
+            
+        Returns:
+            시스템 프롬프트 문자열
+        """
+        system_prompt_parts = [
+            "# ROLE",
+            "사용자에게 도구 실행 결과를 바탕으로 명확하고 유용한 답변을 제공하는 어시스턴트입니다.",
+            "",
+            "# GUIDELINES",
+            "- 핵심 정보를 명확히 전달",
+            "- 필요시 표나 리스트 형태로 구조화",
+            "- 다음 단계 제안 (해당되는 경우)",
+            "- 한국어로 자연스럽게 응답"
+        ]
+        
+        # 대화 컨텍스트가 있는 경우 포함
+        if conversation_context and len(conversation_context) > 0:
+            system_prompt_parts.extend([
+                "",
+                "# CONVERSATION CONTEXT",
+                "이전 대화 내용을 참고하여 문맥에 맞는 응답을 생성하세요:",
+                ""
+            ])
+            
+            for i, turn in enumerate(conversation_context, 1):
+                system_prompt_parts.append(f"**대화 {i}:**")
+                system_prompt_parts.append(f"사용자: {turn.get('user_message', '').strip()}")
+                system_prompt_parts.append(f"어시스턴트: {turn.get('assistant_response', '').strip()}")
+                system_prompt_parts.append("")
+        
+        return "\n".join(system_prompt_parts)
+
+    def _build_response_generation_prompt(
+        self,
+        user_query: str,
+        execution_plan: ExecutionPlan,
+        tool_results: List[Dict[str, Any]],
+    ) -> str:
+        """응답 생성용 프롬프트를 구성합니다"""
+        
+        # tool_results를 JSON 직렬화 가능한 형태로 변환
+        serializable_results = []
+        for result in tool_results:
+            serializable_result = {
+                "tool": result["tool"],
+                "rationale": result["rationale"]
+            }
+            
+            # ToolResult 객체를 딕셔너리로 변환
+            tool_result = result["result"]
+            if hasattr(tool_result, '__dict__'):
+                serializable_result["result"] = {
+                    "success": tool_result.success,
+                    "data": tool_result.data,
+                    "error_message": tool_result.error_message,
+                    "execution_time": tool_result.execution_time,
+                    "metadata": tool_result.metadata
+                }
+            else:
+                serializable_result["result"] = tool_result
+            
+            serializable_results.append(serializable_result)
+        
+        response_prompt = f"""
+# CONTEXT
+사용자 질문: {user_query}
+의도 분석: {execution_plan.intent_summary}
+예상 결과: {execution_plan.expected_outcome}
+
+# TOOL EXECUTION RESULTS
+{json.dumps(serializable_results, ensure_ascii=False, indent=2)}
+
+# TASK
+도구 실행 결과를 바탕으로 사용자가 이해하기 쉬운 답변을 생성하세요.
+        """
+        
+        return response_prompt
+    
+    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
+        """LLM 응답에서 JSON을 추출하고 파싱합니다
+        
+        Args:
+            response: LLM 응답 텍스트
+            
+        Returns:
+            파싱된 JSON 데이터
+            
+        Raises:
+            json.JSONDecodeError: JSON 파싱 실패
+        """
+        # markdown 코드 블록에서 JSON 추출 (```json ... ```)
+        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
+        if json_match:
+            json_content = json_match.group(1).strip()
+            return json.loads(json_content)
+        
+        # 코드 블록이 없다면 전체 응답을 JSON으로 시도
+        try:
+            return json.loads(response.strip())
+        except json.JSONDecodeError:
+            # 백틱이나 다른 마크다운 요소 제거 후 재시도
+            cleaned_response = re.sub(r'```[a-z]*\n?|```\n?|`', '', response).strip()
+            return json.loads(cleaned_response)
