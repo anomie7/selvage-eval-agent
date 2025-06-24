@@ -198,7 +198,7 @@ class SelvageEvaluationAgent:
         ]
         
         # 사용 가능한 도구들 가져오기
-        available_tools = self._get_available_tools()
+        available_tools: List[Tool] = self._get_available_tools()
         
         # LLM 호출 (Function Calling 방식)
         try:
