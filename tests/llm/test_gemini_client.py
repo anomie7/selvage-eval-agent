@@ -200,3 +200,78 @@ class TestGeminiClient:
         # 빈 문자열이 전달되었는지 확인
         call_args = mock_models.generate_content.call_args
         assert call_args[1]['contents'] == ""
+    
+    def test_query_with_tools_success(self, api_key, mock_genai):
+        """tools 파라미터와 함께 쿼리 성공 테스트"""
+        # Given
+        _, mock_client, mock_models = mock_genai
+        gemini_client = GeminiClient(api_key)
+        
+        messages = [{"role": "user", "content": "파일을 읽어주세요"}]
+        system_instruction = "당신은 도움이 되는 어시스턴트입니다"
+        
+        # Mock tool
+        mock_tool = Mock()
+        mock_tool.get_function_declaration.return_value = {
+            "name": "read_file",
+            "description": "파일 읽기",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string"}
+                }
+            },
+            "required": ["file_path"]
+        }
+        tools = [mock_tool]
+        
+        # Mock response
+        mock_response = Mock()
+        mock_models.generate_content.return_value = mock_response
+        
+        # When
+        result = gemini_client.query(messages, system_instruction, tools=tools)
+        
+        # Then
+        assert result == mock_response  # tools가 있으면 전체 응답 반환
+        mock_tool.get_function_declaration.assert_called_once()
+        
+        # generate_content가 tools와 함께 호출되었는지 확인
+        call_args = mock_models.generate_content.call_args
+        assert 'config' in call_args[1]
+        config = call_args[1]['config']
+        assert hasattr(config, 'tools')
+    
+    def test_build_function_declarations(self, api_key, mock_genai):
+        """_build_function_declarations 메서드 테스트"""
+        # Given
+        _, mock_client, mock_models = mock_genai
+        gemini_client = GeminiClient(api_key)
+        
+        # Mock tools
+        mock_tool1 = Mock()
+        mock_tool1.get_function_declaration.return_value = {
+            "name": "read_file",
+            "description": "파일 읽기",
+            "parameters": {"type": "object"},
+            "required": []
+        }
+        
+        mock_tool2 = Mock()
+        mock_tool2.get_function_declaration.return_value = {
+            "name": "write_file", 
+            "description": "파일 쓰기",
+            "parameters": {"type": "object"},
+            "required": []
+        }
+        
+        tools = [mock_tool1, mock_tool2]
+        
+        # When
+        declarations = gemini_client._build_function_declarations(tools)
+        
+        # Then
+        assert len(declarations) == 2
+        assert all(hasattr(decl, 'name') for decl in declarations)
+        mock_tool1.get_function_declaration.assert_called_once()
+        mock_tool2.get_function_declaration.assert_called_once()

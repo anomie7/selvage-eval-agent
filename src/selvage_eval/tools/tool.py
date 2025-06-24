@@ -54,7 +54,23 @@ class Tool(ABC):
             ToolResult: 도구 실행 결과
         """
         pass
-
+    
+    def get_function_declaration(self) -> Dict[str, Any]:
+        """Gemini Function Calling을 위한 function declaration 반환
+        
+        Returns:
+            Dict[str, Any]: Gemini function declaration 형식
+        """
+        schema = self.parameters_schema
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": schema["type"],
+                "properties": schema["properties"],
+                "required": schema.get("required", [])
+            },
+        }
 
 class PhaseExecutionError(Exception):
     """Phase 실행 중 발생하는 에러"""

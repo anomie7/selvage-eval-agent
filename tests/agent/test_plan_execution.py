@@ -48,33 +48,37 @@ class TestPlanExecution:
                 return agent
 
     def test_plan_execution_with_gemini_success(self, agent):
-        """Gemini API를 통한 성공적인 계획 수립 테스트"""
+        """Gemini API Function Calling을 통한 성공적인 계획 수립 테스트"""
         # Given
         user_query = "프로젝트의 최신 커밋들을 분석해주세요"
         
-        # LLM이 반환할 JSON 응답
-        mock_llm_response = json.dumps({
-            "intent_summary": "Analyze recent commits",
-            "confidence": 0.9,
-            "tool_calls": [
-                {
-                    "tool": "execute_safe_command",
-                    "params": {"command": "git log --oneline -10"},
-                    "rationale": "Get recent commit history"
-                },
-                {
-                    "tool": "read_file",
-                    "params": {"file_path": "./README.md"},
-                    "rationale": "Check project information"
-                }
-            ],
-            "safety_check": "Read-only operations, safe",
-            "expected_outcome": "Recent commit analysis"
-        }, ensure_ascii=False)
+        # Function calling 응답 모킹
+        mock_function_call1 = MagicMock()
+        mock_function_call1.name = "execute_safe_command"
+        mock_function_call1.args = {"command": "git log --oneline -10"}
+        
+        mock_function_call2 = MagicMock()
+        mock_function_call2.name = "read_file"
+        mock_function_call2.args = {"file_path": "./README.md"}
+        
+        mock_part1 = MagicMock()
+        mock_part1.function_call = mock_function_call1
+        
+        mock_part2 = MagicMock()
+        mock_part2.function_call = mock_function_call2
+        
+        mock_content = MagicMock()
+        mock_content.parts = [mock_part1, mock_part2]
+        
+        mock_candidate = MagicMock()
+        mock_candidate.content = mock_content
+        
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
         
         # 에이전트의 gemini_client를 모킹
         with patch.object(agent, 'gemini_client') as mock_gemini:
-            mock_gemini.query.return_value = mock_llm_response
+            mock_gemini.query.return_value = mock_response
             
             # _analyze_current_state 모킹
             mock_current_state = {"session_id": "test-123", "completed_phases": []}
@@ -84,15 +88,17 @@ class TestPlanExecution:
                 
                 # Then
                 assert isinstance(result, ExecutionPlan)
-                assert result.intent_summary == "Analyze recent commits"
+                assert "2개의 도구 호출" in result.intent_summary
                 assert result.confidence == 0.9
                 assert len(result.tool_calls) == 2
                 assert result.tool_calls[0].tool == "execute_safe_command"
                 assert result.tool_calls[1].tool == "read_file"
-                assert result.safety_check == "Read-only operations, safe"
+                assert "Function calling 방식" in result.safety_check
                 
-                # query 메서드가 호출되었는지 확인
+                # query 메서드가 tools와 함께 호출되었는지 확인
                 mock_gemini.query.assert_called_once()
+                call_args = mock_gemini.query.call_args
+                assert 'tools' in call_args[1]  # tools 파라미터가 전달되었는지 확인
 
     def test_plan_execution_with_conversation_context(self, agent):
         """대화 컨텍스트를 활용한 계획 수립 테스트"""
@@ -109,31 +115,36 @@ class TestPlanExecution:
         ]
         agent.session_state.get_conversation_context.return_value = conversation_context
         
-        # LLM이 반환할 JSON 응답
-        mock_llm_response = json.dumps({
-            "intent_summary": "Read README.md file based on previous context",
-            "confidence": 0.95,
-            "tool_calls": [
-                {
-                    "tool": "read_file",
-                    "params": {"file_path": "./README.md"},
-                    "rationale": "Read README.md file mentioned in previous conversation"
-                }
-            ],
-            "safety_check": "Read-only operation, safe",
-            "expected_outcome": "README.md file content"
-        }, ensure_ascii=False)
+        # Function calling 응답 모킹
+        mock_function_call = MagicMock()
+        mock_function_call.name = "read_file"
+        mock_function_call.args = {"file_path": "./README.md"}
+        
+        mock_part = MagicMock()
+        mock_part.function_call = mock_function_call
+        
+        mock_content = MagicMock()
+        mock_content.parts = [mock_part]
+        
+        mock_candidate = MagicMock()
+        mock_candidate.content = mock_content
+        
+        mock_response = MagicMock()
+        mock_response.candidates = [mock_candidate]
         
         with patch.object(agent, 'gemini_client') as mock_gemini:
-            mock_gemini.query.return_value = mock_llm_response
+            mock_gemini.query.return_value = mock_response
             
             with patch.object(agent, '_analyze_current_state', return_value={}):
                 # When
                 result = agent.plan_execution(user_query)
                 
                 # Then
-                assert result.intent_summary == "Read README.md file based on previous context"
-                assert result.confidence == 0.95
+                assert "1개의 도구 호출" in result.intent_summary
+                assert result.confidence == 0.9
+                assert len(result.tool_calls) == 1
+                assert result.tool_calls[0].tool == "read_file"
+                assert result.tool_calls[0].params["file_path"] == "./README.md"
                 
                 # query 메서드가 호출되었는지 확인
                 mock_gemini.query.assert_called_once()
@@ -154,23 +165,27 @@ class TestPlanExecution:
                 assert "API rate limit exceeded" in str(exc_info.value)
 
     def test_plan_execution_invalid_response_format(self, agent):
-        """LLM 응답 형식 오류 테스트"""
+        """Function call 응답 없는 경우 테스트"""
         # Given
         user_query = "테스트 쿼리"
         
-        # 잘못된 형식의 LLM 응답 (JSON 문자열로)
-        invalid_llm_response = json.dumps({
-            "intent": "missing required fields",  # intent_summary가 아님
-            "tools": []  # tool_calls가 아님
-        })
+        # Function call이 없는 응답 모킹 (텍스트만 있는 경우)
+        mock_response = MagicMock()
+        mock_response.candidates = []  # 빈 candidates
+        mock_response.text = "텍스트 응답"
         
         with patch.object(agent, 'gemini_client') as mock_gemini:
-            mock_gemini.query.return_value = invalid_llm_response
+            mock_gemini.query.return_value = mock_response
             
             with patch.object(agent, '_analyze_current_state', return_value={}):
-                # When & Then
-                with pytest.raises(KeyError):  # 필수 필드 누락으로 인한 오류
-                    agent.plan_execution(user_query)
+                # When
+                result = agent.plan_execution(user_query)
+                
+                # Then
+                # function call이 없으면 기본 계획이 생성됨
+                assert isinstance(result, ExecutionPlan)
+                assert len(result.tool_calls) == 0
+                assert "텍스트 응답" in result.intent_summary
 
     # LLM 기반 플래닝만 사용하므로 규칙 기반 테스트 제거됨
 

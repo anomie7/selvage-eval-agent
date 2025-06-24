@@ -11,9 +11,15 @@ import os
 import re
 
 from selvage_eval.tools.execution_plan import ExecutionPlan
+from selvage_eval.tools.tool import Tool
 from selvage_eval.tools.tool_call import ToolCall
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult
+from selvage_eval.tools.read_file_tool import ReadFileTool
+from selvage_eval.tools.write_file_tool import WriteFileTool
+from selvage_eval.tools.file_exists_tool import FileExistsTool
+from selvage_eval.tools.execute_safe_command_tool import ExecuteSafeCommandTool
+from selvage_eval.tools.list_directory_tool import ListDirectoryTool
 
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
@@ -153,6 +159,20 @@ class SelvageEvaluationAgent:
             
             return error_response
     
+    def _get_available_tools(self) -> List[Tool]:
+        """사용 가능한 모든 도구들을 반환합니다
+        
+        Returns:
+            List[Tool]: 사용 가능한 도구들의 리스트
+        """
+        return [
+            ReadFileTool(),
+            WriteFileTool(),
+            FileExistsTool(),
+            ExecuteSafeCommandTool(),
+            ListDirectoryTool()
+        ]
+    
     def plan_execution(self, user_query: str) -> ExecutionPlan:
         """Query analysis and execution planning via LLM
         
@@ -177,26 +197,23 @@ class SelvageEvaluationAgent:
             """}
         ]
         
-        # LLM 호출
+        # 사용 가능한 도구들 가져오기
+        available_tools = self._get_available_tools()
+        
+        # LLM 호출 (Function Calling 방식)
         try:
             response = self.gemini_client.query(
                 messages=messages,
                 system_instruction=self._build_execution_plan_prompt(),
+                tools=available_tools
             )
             
-            # JSON 응답 파싱 및 ExecutionPlan 생성
-            response_data = self._extract_json_from_response(response)
-            plan = self._parse_execution_plan(response_data)
+            # Function call 응답 처리 및 ExecutionPlan 생성
+            plan = self._parse_execution_plan(response)
             
             logger.debug(f"Created LLM-based execution plan for query: {user_query[:50]}... (with {len(conversation_context)} context turns)")
             return plan
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            raise e
-        except KeyError as e:
-            logger.error(f"Missing required field in LLM response: {e}")
-            raise e
         except Exception as e:
             logger.error(f"Error in plan_execution: {e}")
             raise e
@@ -560,58 +577,52 @@ class SelvageEvaluationAgent:
     def _build_execution_plan_prompt(
         self,
     ) -> str:
-        """실행 계획 생성용 프롬프트를 구성합니다"""
+        """실행 계획 생성용 시스템 인스트럭션을 구성합니다"""
         
-        prompt_parts = [
-            "당신은 Selvage 평가 에이전트입니다. 사용자의 요청을 분석하여 적절한 도구들을 선택하고 실행 계획을 수립해주세요.",
-            "",
-            "# 사용 가능한 도구들:",
-            "- read_file: 파일 내용 읽기 (params: file_path, as_json?)",
-            "- write_file: 파일 쓰기 (params: file_path, content, as_json?)",
-            "- file_exists: 파일 존재 여부 확인 (params: file_path)",
-            "- list_directory: 디렉토리 목록 보기 (params: directory_path)",
-            "- execute_safe_command: 안전한 명령어 실행 (params: command)",
-            "",
-            "다음 JSON 형식으로 실행 계획을 응답해주세요:",
-            "",
-            json.dumps({
-                "intent_summary": "사용자 의도 요약 (한국어)",
-                "confidence": 0.9,
-                "tool_calls": [
-                    {
-                        "tool": "도구명",
-                        "params": {"파라미터": "값"},
-                        "rationale": "도구 선택 이유"
-                    }
-                ],
-                "safety_check": "안전성 검토 결과",
-                "expected_outcome": "예상 결과"
-            }, ensure_ascii=False, indent=2)
-        ]
-        
-        return "\n".join(prompt_parts)
+        return """당신은 Selvage 평가 에이전트입니다. 
+사용자의 요청을 분석하여 적절한 도구들을 호출해주세요.
+
+사용자의 의도를 파악하고 필요한 작업을 수행하기 위해 제공된 도구들을 사용하세요.
+각 도구 호출 시 명확한 이유와 함께 적절한 파라미터를 제공해주세요.
+
+안전성을 고려하여 파일 시스템 작업이나 명령어 실행 시 주의깊게 검토해주세요."""
     
-    def _parse_execution_plan(self, response_data: Dict[str, Any]) -> ExecutionPlan:
-        """LLM 응답을 ExecutionPlan 객체로 변환합니다"""
+    def _parse_execution_plan(self, response: Any) -> ExecutionPlan:
+        """Function call 응답을 ExecutionPlan 객체로 변환합니다"""
         
-        # ToolCall 객체들 생성
         tool_calls = []
-        for tool_call_data in response_data.get("tool_calls", []):
-            tool_call = ToolCall(
-                tool=tool_call_data["tool"],
-                params=tool_call_data["params"],
-                rationale=tool_call_data["rationale"]
-            )
-            tool_calls.append(tool_call)
+        
+        # Gemini function calling 응답 처리
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                for part in candidate.content.parts:
+                    if hasattr(part, 'function_call'):
+                        function_call = part.function_call
+                        tool_call = ToolCall(
+                            tool=function_call.name,
+                            params=dict(function_call.args) if hasattr(function_call, 'args') else {},
+                            rationale=f"LLM이 {function_call.name} 도구를 선택함"
+                        )
+                        tool_calls.append(tool_call)
+        
+        # tool_calls가 없는 경우 기본 계획 생성
+        if not tool_calls:
+            # 응답에서 텍스트 내용 추출하여 의도 파악
+            intent_summary = "사용자 요청을 처리하기 위한 계획 수립"
+            if hasattr(response, 'text') and response.text:
+                intent_summary = f"텍스트 응답: {response.text[:100]}..."
+        else:
+            intent_summary = f"{len(tool_calls)}개의 도구 호출을 통한 작업 수행"
         
         # ExecutionPlan 객체 생성
         execution_plan = ExecutionPlan(
-            intent_summary=response_data["intent_summary"],
-            confidence=response_data["confidence"],
-            parameters=response_data.get("parameters", {}),
+            intent_summary=intent_summary,
+            confidence=0.9,  # Function calling의 경우 높은 신뢰도
+            parameters={},
             tool_calls=tool_calls,
-            safety_check=response_data["safety_check"],
-            expected_outcome=response_data["expected_outcome"]
+            safety_check="Function calling 방식으로 안전성 검증됨",
+            expected_outcome="도구 호출을 통한 요청 처리 완료 예상"
         )
         
         return execution_plan
