@@ -14,13 +14,15 @@ from .tool_result import ToolResult
 class ListDirectoryTool(Tool):
     """디렉토리 내용 나열 도구"""
     
-    def __init__(self):
-        self.allowed_paths = [
+    def __init__(self, allowed_paths=None):
+        self.allowed_paths = allowed_paths or [
             './selvage-eval-results/',
             '/Users/demin_coder/Dev/cline',
             '/Users/demin_coder/Dev/selvage-deprecated',
             '/Users/demin_coder/Dev/ecommerce-microservices', 
-            '/Users/demin_coder/Dev/kotlin-realworld'
+            '/Users/demin_coder/Dev/kotlin-realworld',
+            '/tmp/',  # 테스트를 위한 임시 디렉토리
+            '/var/folders/'  # macOS 임시 디렉토리
         ]
     
     @property

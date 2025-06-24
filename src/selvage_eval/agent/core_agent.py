@@ -34,13 +34,15 @@ class SelvageEvaluationAgent:
     Supports both interactive mode and automatic execution mode.
     """
     
-    def __init__(self, config: EvaluationConfig):
+    def __init__(self, config: EvaluationConfig, work_dir: str = "."):
         """Initialize the agent
         
         Args:
             config: Evaluation configuration
+            work_dir: Working directory for agent operations (default: current directory)
         """
         self.config = config
+        self.work_dir = work_dir
         self.session_state = SessionState()  # 즉시 초기화
         self.current_phase: Optional[str] = None
         self.is_interactive_mode = False
@@ -66,7 +68,7 @@ class SelvageEvaluationAgent:
         # 자동 영속화 시작
         self.session_state.auto_persist(self.config.evaluation.output_dir)
         
-        logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model} (session: {self.session_state.session_id})")
+        logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model} (session: {self.session_state.session_id}, work_dir: {self.work_dir})")
     
     
     def reset_session(self, session_id: Optional[str] = None) -> str:
@@ -597,14 +599,15 @@ class SelvageEvaluationAgent:
             candidate = response.candidates[0]
             if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                 for part in candidate.content.parts:
-                    if hasattr(part, 'function_call'):
+                    if hasattr(part, 'function_call') and part.function_call is not None:
                         function_call = part.function_call
-                        tool_call = ToolCall(
-                            tool=function_call.name,
-                            params=dict(function_call.args) if hasattr(function_call, 'args') else {},
-                            rationale=f"LLM이 {function_call.name} 도구를 선택함"
-                        )
-                        tool_calls.append(tool_call)
+                        if hasattr(function_call, 'name') and function_call.name:
+                            tool_call = ToolCall(
+                                tool=function_call.name,
+                                params=dict(function_call.args) if hasattr(function_call, 'args') else {},
+                                rationale=f"LLM이 {function_call.name} 도구를 선택함"
+                            )
+                            tool_calls.append(tool_call)
         
         # tool_calls가 없는 경우 기본 계획 생성
         if not tool_calls:
