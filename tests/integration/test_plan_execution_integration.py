@@ -55,7 +55,7 @@ class TestPlanExecutionIntegration:
         agent = SelvageEvaluationAgent(real_config, work_dir=str(temp_dir))
         return agent
 
-    def test_plan_execution_file_listing_request(self, agent, temp_dir):
+    def test_plan_execution_file_listing_request(self, agent: SelvageEvaluationAgent, temp_dir):
         """파일 목록 조회 요청에 대한 계획 수립 테스트"""
         # Given: 실제 사용자가 할 법한 파일 조회 요청
         user_query = "현재 디렉토리의 파일들을 보여주세요"
@@ -78,7 +78,7 @@ class TestPlanExecutionIntegration:
         # 적어도 하나의 도구 호출이 있어야 함
         assert len(result.tool_calls) > 0
 
-    def test_plan_execution_file_reading_request(self, agent, temp_dir):
+    def test_plan_execution_file_reading_request(self, agent: SelvageEvaluationAgent, temp_dir):
         """파일 읽기 요청에 대한 계획 수립 테스트"""
         # Given: 테스트 파일 생성
         test_file = temp_dir / "sample.txt"
@@ -119,6 +119,8 @@ class TestPlanExecutionIntegration:
         
         # execute_safe_command 도구가 있어야 함
         assert "execute_safe_command" in tool_names
+        expected_params = [tc.params for tc in result.tool_calls]
+        assert "git_status" in expected_params
 
     def test_plan_execution_complex_analysis_request(self, agent, temp_dir):
         """복합적인 분석 요청에 대한 계획 수립 테스트"""
@@ -127,7 +129,7 @@ class TestPlanExecutionIntegration:
         (temp_dir / "README.md").write_text("# 테스트 프로젝트", encoding="utf-8")
         (temp_dir / "config.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
         
-        user_query = "프로젝트 구조를 분석하고 설정 파일의 내용도 확인해주세요"
+        user_query = "프로젝트 구조를 분석하고 설정 파일의 내용도 확인해주세요."
         
         # When: 실제 LLM 호출로 계획 수립
         result = agent.plan_execution(user_query)

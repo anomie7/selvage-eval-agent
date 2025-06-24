@@ -214,6 +214,7 @@ class SelvageEvaluationAgent:
             plan = self._parse_execution_plan(response)
             
             logger.debug(f"Created LLM-based execution plan for query: {user_query[:50]}... (with {len(conversation_context)} context turns)")
+            print(f"{response.text}")
             return plan
             
         except Exception as e:
