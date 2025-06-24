@@ -147,12 +147,70 @@ def test_main():
         # 응답 내용 검증
         assert "프로젝트" in response or "구조" in response or "파일" in response
         
-        # 응답 결과 출력
-        print(f"\n[기본 단일 쿼리 테스트] 응답 (길이: {len(response)}자)")
-        print("=" * 80)
+        # 완전한 대화 흐름 분석 출력
+        print(f"\n[기본 단일 쿼리 테스트] 완전한 대화 흐름 분석")
+        print("=" * 100)
+        
+        # 1. 사용자 입력
+        print(f"📋 사용자 질문:")
+        print(f"   {history_entry['user_message']}")
+        print()
+        
+        # 2. 도구 실행 상세 분석
+        if history_entry.get('tool_results'):
+            print(f"⚙️ 도구 실행 상세 ({len(history_entry['tool_results'])}개 도구 실행됨):")
+            for i, tool_result in enumerate(history_entry['tool_results'], 1):
+                tool_name = tool_result.get('tool', 'Unknown')
+                rationale = tool_result.get('rationale', 'N/A')
+                result_obj = tool_result.get('result')
+                
+                print(f"   도구 {i}: {tool_name}")
+                print(f"      목적: {rationale}")
+                
+                if result_obj:
+                    print(f"      성공: {getattr(result_obj, 'success', 'Unknown')}")
+                    print(f"      실행시간: {getattr(result_obj, 'execution_time', 'Unknown')}초")
+                    
+                    # 결과 데이터 완전 출력
+                    result_data = getattr(result_obj, 'data', None)
+                    if result_data:
+                        print(f"      결과 데이터:")
+                        if isinstance(result_data, str):
+                            # 문자열인 경우 줄별로 출력
+                            for line_num, line in enumerate(result_data.split('\n'), 1):
+                                print(f"        {line_num:3d}: {line}")
+                        else:
+                            print(f"        {result_data}")
+                    
+                    # 오류 메시지 출력
+                    error_msg = getattr(result_obj, 'error_message', None)
+                    if error_msg:
+                        print(f"      오류: {error_msg}")
+                else:
+                    print(f"      결과: 정보 없음")
+                print()
+        else:
+            print("⚙️ 도구 실행: 없음")
+            print()
+        
+        # 3. 최종 사용자 응답
+        print(f"🤖 최종 사용자 응답 (길이: {len(response)}자):")
         for i, line in enumerate(response.split('\n'), 1):
-            print(f"{i:3d}: {line}")
-        print("=" * 80)
+            print(f"   {i:3d}: {line}")
+        print()
+        
+        # 4. 대화 상태 분석
+        korean_chars = sum(1 for char in response if '\uac00' <= char <= '\ud7af')
+        korean_ratio = (korean_chars / len(response) * 100) if response else 0
+        
+        print(f"📊 대화 상태 분석:")
+        print(f"   히스토리 수: {len(agent.session_state.conversation_history)}")
+        print(f"   응답 길이: {len(response)}자")
+        print(f"   한국어 비율: {korean_ratio:.1f}%")
+        print(f"   대화 타임스탬프: {history_entry.get('timestamp', 'N/A')}")
+        print(f"   턴 ID: {history_entry.get('turn_id', 'N/A')}")
+        
+        print("=" * 100)
         
         # 한국어 응답 확인
         korean_chars = sum(1 for char in response if '\uac00' <= char <= '\ud7af')
@@ -206,6 +264,19 @@ def test_main():
         print("=" * 80)
         for i, line in enumerate(second_response.split('\n'), 1):
             print(f"{i:3d}: {line}")
+        print("=" * 80)
+        
+        # 대화 히스토리 분석 출력
+        print(f"\n[대화 플로우 테스트] 대화 히스토리 분석")
+        print("=" * 80)
+        for i, history in enumerate([first_history, second_history], 1):
+            print(f"대화 {i}:")
+            print(f"  질문: {history['user_message']}")
+            print(f"  응답 길이: {len(history['assistant_response'])}자")
+            if history.get('tool_results'):
+                print(f"  도구 호출 수: {len(history['tool_results'])}")
+                for j, tool_result in enumerate(history['tool_results'], 1):
+                    print(f"    도구 {j}: {tool_result.get('tool_name', 'Unknown')} - {tool_result.get('status', 'Unknown')}")
         print("=" * 80)
 
     def test_handle_user_message_special_commands(self, agent: SelvageEvaluationAgent, sample_project_structure):
@@ -273,6 +344,17 @@ def test_main():
         print("!" * 80)
         for i, line in enumerate(response.split('\n'), 1):
             print(f"{i:3d}: {line}")
+        print("!" * 80)
+        
+        # 오류 처리 대화 히스토리 분석
+        print(f"\n[오류 처리 테스트] 대화 히스토리 분석")
+        print("!" * 80)
+        print(f"사용자 질문: {history_entry['user_message']}")
+        print(f"어시스턴트 응답 길이: {len(history_entry['assistant_response'])}자")
+        if history_entry.get('tool_results'):
+            print(f"도구 호출 결과 수: {len(history_entry['tool_results'])}")
+            for i, tool_result in enumerate(history_entry['tool_results'], 1):
+                print(f"  도구 {i}: {tool_result.get('tool_name', 'Unknown')} - {tool_result.get('status', 'Unknown')}")
         print("!" * 80)
 
     def test_handle_user_message_exception_handling(self, agent: SelvageEvaluationAgent, sample_project_structure):
