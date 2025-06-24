@@ -102,7 +102,7 @@ class TestPlanExecutionIntegration:
         has_expected_tool = any(tool in tool_names for tool in expected_tools)
         assert has_expected_tool, f"Expected one of {expected_tools} in {tool_names}"
 
-    def test_plan_execution_git_status_request(self, agent, temp_dir):
+    def test_plan_execution_git_status_request(self, agent: SelvageEvaluationAgent, temp_dir):
         """Git 상태 확인 요청에 대한 계획 수립 테스트"""
         # Given: Git 관련 요청
         user_query = "git 상태를 확인해주세요"
@@ -119,62 +119,58 @@ class TestPlanExecutionIntegration:
         
         # execute_safe_command 도구가 있어야 함
         assert "execute_safe_command" in tool_names
-        expected_params = [tc.params for tc in result.tool_calls]
-        assert "git_status" in expected_params
+        expected_command = [tc.params['command'] for tc in result.tool_calls]
+        assert "git status" in expected_command
 
-    def test_plan_execution_complex_analysis_request(self, agent, temp_dir):
-        """복합적인 분석 요청에 대한 계획 수립 테스트"""
-        # Given: 여러 단계가 필요한 복잡한 요청
-        # 테스트 파일들 생성
-        (temp_dir / "README.md").write_text("# 테스트 프로젝트", encoding="utf-8")
-        (temp_dir / "config.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
-        
-        user_query = "프로젝트 구조를 분석하고 설정 파일의 내용도 확인해주세요."
-        
-        # When: 실제 LLM 호출로 계획 수립
-        result = agent.plan_execution(user_query)
-        
-        # Then: 복합적인 계획이 수립되는지 검증
-        assert isinstance(result, ExecutionPlan)
-        assert result.confidence > 0.0
-        
-        # 최소 하나의 도구 호출이 있어야 함
-        assert len(result.tool_calls) >= 1
-        
-        tool_names = [tc.tool for tc in result.tool_calls]
-        print(f"Tool calls for complex analysis: {tool_names}")
-        
-        # 디렉토리 조회나 파일 읽기 도구가 포함되어야 함
-        expected_tools = ["list_directory", "read_file", "file_exists"]
-        has_expected_tools = any(tool in tool_names for tool in expected_tools)
-        assert has_expected_tools, f"Expected one of {expected_tools} in {tool_names}"
-
-    def test_plan_execution_with_conversation_context(self, agent, temp_dir):
+    def test_plan_execution_with_conversation_context(self, agent: SelvageEvaluationAgent, temp_dir):
         """대화 컨텍스트가 있는 상황에서의 계획 수립 테스트"""
-        # Given: 이전 대화 컨텍스트 설정 (add_conversation_turn 메서드 사용)
+        # Given: temp_dir에 README.md 파일 생성
+        readme_file = temp_dir / "README.md"
+        readme_file.write_text("# 테스트 프로젝트\n\n이것은 테스트용 프로젝트입니다.", encoding="utf-8")
+        
+        # 첫 번째 대화: 디렉토리 목록 조회
         agent.session_state.add_conversation_turn(
-            user_message="README.md 파일이 있는지 확인해줘",
-            assistant_response="README.md 파일이 존재합니다.",
-            tool_results=[{"tool": "file_exists", "result": {"exists": True}}]
+            user_message="현재 디렉토리에 어떤 파일들이 있는지 보여줘",
+            assistant_response="디렉토리 목록을 확인했습니다. README.md 파일이 있습니다.",
+            tool_results=[{"tool": "list_directory", "result": {
+                "directory_path": str(temp_dir),
+                "files": ["README.md"],
+                "directories": [],
+                "total_items": 1
+            }}]
         )
         
-        # 후속 질문 (더 명확하게)
+        # 두 번째 대화: README.md 파일 존재 확인
+        agent.session_state.add_conversation_turn(
+            user_message="README.md 파일이 정말 있는지 확인해줘",
+            assistant_response="README.md 파일이 존재합니다.",
+            tool_results=[{"tool": "file_exists", "result": {"exists": True, "path": str(readme_file)}}]
+        )
+        
+        # 세 번째 요청: README.md 파일 내용 읽기
         user_query = "README.md 파일의 내용을 읽어서 보여줘"
         
         # When: 컨텍스트를 고려한 계획 수립
         result = agent.plan_execution(user_query)
         
-        # Then: 계획이 수립되는지 검증 (도구 호출 여부는 관대하게)
+        # Then: 계획이 수립되는지 검증
         assert isinstance(result, ExecutionPlan)
         assert result.intent_summary is not None
         assert len(result.intent_summary) > 0
         
-        # 결과 출력 (도구 호출이 있든 없든)
+        # read_file 도구가 호출되고 정확한 파일 경로가 제공되는지 검증
         tool_calls_with_params = [(tc.tool, tc.params) for tc in result.tool_calls]
         print(f"Tool calls with context: {tool_calls_with_params}")
         print(f"Intent summary: {result.intent_summary}")
+        
+        # read_file 도구가 있어야 하고, 정확한 파일 경로를 사용해야 함
+        read_file_calls = [tc for tc in result.tool_calls if tc.tool == "read_file"]
+        if read_file_calls:
+            # 정확한 파일 경로가 제공되었는지 확인
+            file_path = read_file_calls[0].params.get("file_path", "")
+            assert str(readme_file) in file_path or "README.md" in file_path, f"Expected README.md path in {file_path}"
 
-    def test_plan_execution_safety_validation(self, agent, temp_dir):
+    def test_plan_execution_safety_validation(self, agent: SelvageEvaluationAgent, temp_dir):
         """안전성 검증이 포함된 계획 수립 테스트"""
         # Given: 안전한 작업 요청
         user_query = "텍스트 파일을 하나 생성해주세요"

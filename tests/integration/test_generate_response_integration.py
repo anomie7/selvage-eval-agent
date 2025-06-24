@@ -115,7 +115,7 @@ def test_main():
         
         return temp_dir
 
-    def test_generate_response_file_analysis_scenario(self, agent, sample_project_structure):
+    def test_generate_response_file_analysis_scenario(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """파일 분석 시나리오에 대한 응답 생성 테스트"""
         # Given: 프로젝트 분석 요청과 도구 실행 결과
         user_query = "프로젝트 구조를 분석하고 주요 파일들의 내용을 요약해주세요"

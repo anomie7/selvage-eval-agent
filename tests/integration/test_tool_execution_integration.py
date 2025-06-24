@@ -73,7 +73,7 @@ class TestToolExecutionIntegration:
         
         return temp_dir
 
-    def test_file_operations_chain(self, agent, setup_test_environment):
+    def test_file_operations_chain(self, agent: SelvageEvaluationAgent, setup_test_environment):
         """파일 조작 도구들의 연쇄 실행 테스트"""
         # Given: 파일 조작 시나리오
         temp_dir = setup_test_environment
@@ -110,7 +110,7 @@ class TestToolExecutionIntegration:
         assert verify_result.success
         assert "도구 실행 테스트 결과" in verify_result.data["content"]
 
-    def test_directory_operations(self, agent, setup_test_environment):
+    def test_directory_operations(self, agent: SelvageEvaluationAgent, setup_test_environment):
         """디렉토리 조회 도구 실행 테스트"""
         # Given: 디렉토리 구조가 설정된 환경
         temp_dir = setup_test_environment
@@ -141,7 +141,7 @@ class TestToolExecutionIntegration:
         for expected in expected_dirs:
             assert expected in directories, f"Expected directory {expected} not found in {directories}"
 
-    def test_safe_command_execution(self, agent, setup_test_environment):
+    def test_safe_command_execution(self, agent: SelvageEvaluationAgent, setup_test_environment):
         """안전한 명령어 실행 도구 테스트"""
         # Given: 안전한 명령어들
         temp_dir = setup_test_environment
@@ -167,7 +167,7 @@ class TestToolExecutionIntegration:
             # 각 명령어가 성공적으로 실행되는지 확인
             assert result.success or result.error_message is not None
 
-    def test_json_file_operations(self, agent, setup_test_environment):
+    def test_json_file_operations(self, agent: SelvageEvaluationAgent, setup_test_environment):
         """JSON 파일 조작 도구 테스트"""
         # Given: JSON 파일이 있는 환경
         temp_dir = setup_test_environment
@@ -201,7 +201,7 @@ class TestToolExecutionIntegration:
         assert write_result.success
         print(f"JSON write result: {write_result.data}")
 
-    def test_plan_execution_to_tool_execution_flow(self, agent, setup_test_environment):
+    def test_plan_execution_to_tool_execution_flow(self, agent: SelvageEvaluationAgent, setup_test_environment):
         """plan_execution → 도구 실행 전체 흐름 테스트"""
         # Given: 실제 사용자 요청 시나리오
         temp_dir = setup_test_environment
@@ -239,7 +239,7 @@ class TestToolExecutionIntegration:
             # 성공하거나 명확한 오류 메시지가 있어야 함
             assert result.success or result.error_message is not None
 
-    def test_error_handling_in_tool_execution(self, agent, temp_dir):
+    def test_error_handling_in_tool_execution(self, agent: SelvageEvaluationAgent, temp_dir):
         """도구 실행 중 오류 처리 테스트"""
         # Given: 잘못된 파라미터나 존재하지 않는 파일
         error_scenarios = [
@@ -274,7 +274,7 @@ class TestToolExecutionIntegration:
             else:
                 print(f"Unexpectedly succeeded: {result.data}")
 
-    def test_tool_execution_with_korean_content(self, agent, temp_dir):
+    def test_tool_execution_with_korean_content(self, agent: SelvageEvaluationAgent, temp_dir):
         """한글 내용을 포함한 도구 실행 테스트"""
         # Given: 한글 내용이 포함된 파일 작업
         korean_content = """

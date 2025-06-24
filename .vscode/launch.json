@@ -53,6 +53,23 @@
             }
         },
         {
+            "name": "Python: pytest - 클래스 메서드",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "-v",
+                "${file}::${input:testClass}::${input:testMethod}"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "python": "${workspaceFolder}/venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
             "name": "Python: Selvage Eval Agent - 대화형 모드",
             "type": "debugpy",
             "request": "launch",
@@ -117,8 +134,20 @@
         {
             "id": "testFunction",
             "type": "promptString",
-            "description": "테스트할 함수 이름을 입력하세요",
+            "description": "테스트할 함수 이름을 입력하세요 (클래스 메서드의 경우 'ClassName::method_name' 형식)",
             "default": "test_example"
+        },
+        {
+            "id": "testClass",
+            "type": "promptString",
+            "description": "테스트 클래스 이름을 입력하세요",
+            "default": "TestPlanExecutionIntegration"
+        },
+        {
+            "id": "testMethod",
+            "type": "promptString",
+            "description": "테스트 메서드 이름을 입력하세요",
+            "default": "test_plan_execution_safety_validation"
         }
     ]
 } 

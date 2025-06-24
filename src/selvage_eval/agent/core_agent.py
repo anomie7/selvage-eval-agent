@@ -275,6 +275,7 @@ class SelvageEvaluationAgent:
             result = ToolExecutor().execute_tool_call(tool_name, params)
             
             logger.debug(f"Executed tool {tool_name} in {result.execution_time:.2f}s")
+
             return result
         except Exception as e:
             logger.error(f"Tool execution failed: {tool_name} - {e}")
