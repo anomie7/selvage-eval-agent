@@ -216,7 +216,7 @@ def test_main():
         korean_chars = sum(1 for char in response if '\uac00' <= char <= '\ud7af')
         assert korean_chars > 10, "응답에 충분한 한국어 내용이 포함되어야 합니다"
 
-    def test_generate_response_file_creation_scenario(self, agent, temp_dir):
+    def test_generate_response_file_creation_scenario(self, agent: SelvageEvaluationAgent, temp_dir):
         """파일 생성 시나리오에 대한 응답 생성 테스트"""
         # Given: 파일 생성 요청과 성공적인 실행 결과
         user_query = "새로운 설정 파일을 생성해주세요"
@@ -272,7 +272,7 @@ def test_main():
             print(f"{i:3d}: {line}")
         print("="*80 + "\n")
 
-    def test_generate_response_error_handling_scenario(self, agent, temp_dir):
+    def test_generate_response_error_handling_scenario(self, agent: SelvageEvaluationAgent, temp_dir):
         """오류 처리 시나리오에 대한 응답 생성 테스트"""
         # Given: 실패한 도구 실행 결과
         user_query = "존재하지 않는 파일을 읽어주세요"
@@ -321,7 +321,7 @@ def test_main():
             print(f"{i:3d}: {line}")
         print("!"*80 + "\n")
 
-    def test_generate_response_with_conversation_context(self, agent, sample_project_structure):
+    def test_generate_response_with_conversation_context(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """대화 컨텍스트가 있는 상황에서의 응답 생성 테스트"""
         # Given: 이전 대화 컨텍스트가 있는 상황
         temp_dir = sample_project_structure
@@ -393,7 +393,7 @@ def test_main():
             print(f"{i:3d}: {line}")
         print("="*80 + "\n")
 
-    def test_generate_response_complex_multi_step_scenario(self, agent, sample_project_structure):
+    def test_generate_response_complex_multi_step_scenario(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """복잡한 다단계 작업 시나리오에 대한 응답 생성 테스트"""
         # Given: 여러 도구를 사용한 복합 작업 결과
         temp_dir = sample_project_structure
@@ -443,7 +443,7 @@ def test_main():
             print(f"{i:3d}: {line}")
         print("="*80 + "\n")
 
-    def test_generate_response_korean_content_handling(self, agent, temp_dir):
+    def test_generate_response_korean_content_handling(self, agent: SelvageEvaluationAgent, temp_dir):
         """한글 내용 처리에 대한 응답 생성 테스트"""
         # Given: 한글 내용이 포함된 파일 작업
         korean_file_content = """
