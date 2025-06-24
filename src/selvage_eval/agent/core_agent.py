@@ -109,8 +109,8 @@ class SelvageEvaluationAgent:
         """
         self.is_interactive_mode = True
         
-        # 특수 명령어 처리
-        if message.startswith('/'):
+        # 특수 명령어 처리 (단순히 /로 시작하는 게 아니라 실제 명령어인지 확인)
+        if message.strip().startswith('/') and message.strip().split()[0] in ['/clear', '/context']:
             return self._handle_special_command(message)
         
         try:
