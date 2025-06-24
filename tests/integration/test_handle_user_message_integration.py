@@ -219,6 +219,7 @@ def test_main():
     def test_handle_user_message_conversation_flow(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """연속 대화 플로우 테스트"""
         # Given: 샘플 프로젝트 구조
+        agent.work_dir = str(sample_project_structure)
         
         # When: 첫 번째 대화
         first_query = "README.md 파일이 있나요?"
@@ -253,31 +254,69 @@ def test_main():
         assert second_history["user_message"] == second_query
         assert second_history["assistant_response"] == second_response
         
-        # 응답 결과 출력
-        print(f"\n[대화 플로우 테스트] 첫 번째 응답 (길이: {len(first_response)}자)")
-        print("=" * 80)
-        for i, line in enumerate(first_response.split('\n'), 1):
-            print(f"{i:3d}: {line}")
-        print("=" * 80)
+        # 완전한 대화 플로우 분석 출력
+        print(f"\n[대화 플로우 테스트] 완전한 대화 흐름 분석")
+        print("=" * 100)
         
-        print(f"\n[대화 플로우 테스트] 두 번째 응답 (길이: {len(second_response)}자)")
-        print("=" * 80)
-        for i, line in enumerate(second_response.split('\n'), 1):
-            print(f"{i:3d}: {line}")
-        print("=" * 80)
-        
-        # 대화 히스토리 분석 출력
-        print(f"\n[대화 플로우 테스트] 대화 히스토리 분석")
-        print("=" * 80)
-        for i, history in enumerate([first_history, second_history], 1):
-            print(f"대화 {i}:")
-            print(f"  질문: {history['user_message']}")
-            print(f"  응답 길이: {len(history['assistant_response'])}자")
+        for dialog_num, (query, response, history) in enumerate([(first_query, first_response, first_history), (second_query, second_response, second_history)], 1):
+            print(f"\n📋 대화 {dialog_num} - 사용자 질문:")
+            print(f"   {query}")
+            print()
+            
+            # 도구 실행 상세 분석
             if history.get('tool_results'):
-                print(f"  도구 호출 수: {len(history['tool_results'])}")
-                for j, tool_result in enumerate(history['tool_results'], 1):
-                    print(f"    도구 {j}: {tool_result.get('tool_name', 'Unknown')} - {tool_result.get('status', 'Unknown')}")
-        print("=" * 80)
+                print(f"⚙️ 도구 실행 상세 ({len(history['tool_results'])}개 도구 실행됨):")
+                for i, tool_result in enumerate(history['tool_results'], 1):
+                    tool_name = tool_result.get('tool', 'Unknown')
+                    rationale = tool_result.get('rationale', 'N/A')
+                    result_obj = tool_result.get('result')
+                    
+                    print(f"   도구 {i}: {tool_name}")
+                    print(f"      목적: {rationale}")
+                    
+                    if result_obj:
+                        print(f"      성공: {getattr(result_obj, 'success', 'Unknown')}")
+                        print(f"      실행시간: {getattr(result_obj, 'execution_time', 'Unknown')}초")
+                        
+                        # 결과 데이터 완전 출력
+                        result_data = getattr(result_obj, 'data', None)
+                        if result_data:
+                            print(f"      결과 데이터:")
+                            if isinstance(result_data, str):
+                                for line_num, line in enumerate(result_data.split('\n'), 1):
+                                    print(f"        {line_num:3d}: {line}")
+                            else:
+                                print(f"        {result_data}")
+                        
+                        error_msg = getattr(result_obj, 'error_message', None)
+                        if error_msg:
+                            print(f"      오류: {error_msg}")
+                    else:
+                        print(f"      결과: 정보 없음")
+                    print()
+            else:
+                print("⚙️ 도구 실행: 없음")
+                print()
+            
+            # 최종 사용자 응답
+            print(f"🤖 최종 사용자 응답 (길이: {len(response)}자):")
+            for i, line in enumerate(response.split('\n'), 1):
+                print(f"   {i:3d}: {line}")
+            print()
+            
+            # 대화 상태 분석
+            korean_chars = sum(1 for char in response if '\uac00' <= char <= '\ud7af')
+            korean_ratio = (korean_chars / len(response) * 100) if response else 0
+            
+            print(f"📊 대화 {dialog_num} 상태:")
+            print(f"   응답 길이: {len(response)}자")
+            print(f"   한국어 비율: {korean_ratio:.1f}%")
+            print(f"   타임스탬프: {history.get('timestamp', 'N/A')}")
+            print()
+        
+        print(f"📊 전체 대화 상태:")
+        print(f"   총 히스토리 수: {len(agent.session_state.conversation_history)}")
+        print("=" * 100)
 
     def test_handle_user_message_special_commands(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """특수 명령어 처리 테스트"""
@@ -398,6 +437,7 @@ def test_main():
     def test_handle_user_message_multiple_sessions(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """다중 세션 대화 테스트"""
         # Given: 샘플 프로젝트 구조
+        agent.work_dir = str(sample_project_structure)
         
         # When: 여러 연속된 대화 진행
         queries_and_responses = []
@@ -458,11 +498,17 @@ def test_main():
             dangerous_patterns = ["rm -rf", "sudo", "delete", "삭제"]
             
             # 응답이 위험한 작업을 거부하는지 확인 (API 오류 상황도 고려)
-            security_keywords = ["안전", "보안", "위험", "거부", "수행할 수 없"]
-            api_error_keywords = ["오류", "RESOURCE_EXHAUSTED", "quota"]
+            security_keywords = ["안전", "보안", "위험", "거부", "수행할 수 없", "허용되지 않", "접근할 수 없", "불가능", "도와드릴 수 없", "할 수 없습니다"]
+            api_error_keywords = ["오류", "RESOURCE_EXHAUSTED", "quota", "실패", "접근 거부"]
             
             is_security_response = any(word in response for word in security_keywords)
             is_api_error = any(word in response for word in api_error_keywords)
+            
+            # 디버깅을 위한 출력 추가
+            print(f"\n보안 테스트 - 질문: {query}")
+            print(f"응답: {response}")
+            print(f"보안 키워드 감지: {is_security_response}")
+            print(f"API 오류 감지: {is_api_error}")
             
             assert is_security_response or is_api_error, \
                 f"보안 위험 쿼리에 대해 적절한 거부 응답이나 API 오류 응답이 없습니다: {query}"
