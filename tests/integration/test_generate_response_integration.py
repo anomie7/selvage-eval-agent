@@ -154,12 +154,10 @@ def test_main():
                 "result": ToolResult(
                     success=True,
                     data={
-                        "items": [
-                            {"name": "README.md", "type": "file", "size": 245},
-                            {"name": "config.json", "type": "file", "size": 158},
-                            {"name": "src", "type": "directory"},
-                            {"name": "tests", "type": "directory"}
-                        ]
+                        "directory_path": str(temp_dir),
+                        "files": ["README.md", "config.json"],
+                        "directories": ["src", "tests"],
+                        "total_items": 4
                     },
                     error_message=None
                 ),
@@ -169,7 +167,12 @@ def test_main():
                 "tool": "read_file",
                 "result": ToolResult(
                     success=True,
-                    data={"content": (temp_dir / "README.md").read_text(encoding="utf-8")},
+                    data={
+                        "content": (temp_dir / "README.md").read_text(encoding="utf-8"),
+                        "file_path": str(temp_dir / "README.md"),
+                        "file_size_bytes": len((temp_dir / "README.md").read_text(encoding="utf-8").encode('utf-8')),
+                        "encoding": "utf-8"
+                    },
                     error_message=None
                 ),
                 "rationale": "프로젝트 개요 파악"
@@ -178,7 +181,12 @@ def test_main():
                 "tool": "read_file",
                 "result": ToolResult(
                     success=True,
-                    data={"content": (temp_dir / "config.json").read_text(encoding="utf-8")},
+                    data={
+                        "content": (temp_dir / "config.json").read_text(encoding="utf-8"),
+                        "file_path": str(temp_dir / "config.json"),
+                        "file_size_bytes": len((temp_dir / "config.json").read_text(encoding="utf-8").encode('utf-8')),
+                        "encoding": "utf-8"
+                    },
                     error_message=None
                 ),
                 "rationale": "프로젝트 설정 정보 확인"
@@ -196,8 +204,13 @@ def test_main():
         assert "프로젝트" in response
         assert "구조" in response or "파일" in response
         
-        print(f"Generated response length: {len(response)}")
-        print(f"Response preview: {response[:200]}...")
+        # 응답 결과를 가독성 좋게 출력
+        print("\n" + "="*80)
+        print(f"[파일 분석 테스트] LLM 응답 결과 (길이: {len(response)}자)")
+        print("="*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("="*80 + "\n")
         
         # 응답이 한국어로 작성되었는지 확인
         korean_chars = sum(1 for char in response if '\uac00' <= char <= '\ud7af')
@@ -231,7 +244,11 @@ def test_main():
                 "tool": "write_file",
                 "result": ToolResult(
                     success=True,
-                    data={"file_created": True, "path": str(temp_dir / "new_config.yaml")},
+                    data={
+                        "file_path": str(temp_dir / "new_config.yaml"),
+                        "bytes_written": len("app:\n  name: test-app\n  version: 1.0.0\n  debug: true".encode('utf-8')),
+                        "encoding": "utf-8"
+                    },
                     error_message=None
                 ),
                 "rationale": "새로운 YAML 설정 파일 생성"
@@ -247,7 +264,13 @@ def test_main():
         assert "설정" in response or "파일" in response
         assert "생성" in response or "완료" in response
         
-        print(f"File creation response: {response}")
+        # 응답 결과를 가독성 좋게 출력
+        print("\n" + "="*80)
+        print(f"[파일 생성 테스트] LLM 응답 결과 (길이: {len(response)}자)")
+        print("="*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("="*80 + "\n")
 
     def test_generate_response_error_handling_scenario(self, agent, temp_dir):
         """오류 처리 시나리오에 대한 응답 생성 테스트"""
@@ -290,7 +313,13 @@ def test_main():
         assert "파일" in response
         assert "없" in response or "오류" in response or "실패" in response
         
-        print(f"Error handling response: {response}")
+        # 오류 응답 결과를 가독성 좋게 출력 (에러 강조)
+        print("\n" + "!"*80)
+        print(f"[오류 처리 테스트] LLM 오류 응답 결과 (길이: {len(response)}자)")
+        print("!"*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("!"*80 + "\n")
 
     def test_generate_response_with_conversation_context(self, agent, sample_project_structure):
         """대화 컨텍스트가 있는 상황에서의 응답 생성 테스트"""
@@ -302,7 +331,12 @@ def test_main():
             {
                 "user_message": "README.md 파일이 있나요?",
                 "assistant_response": "네, README.md 파일이 존재합니다. 프로젝트 개요가 담겨 있습니다.",
-                "tool_results": [{"tool": "file_exists", "result": {"exists": True}}],
+                "tool_results": [{"tool": "file_exists", "result": {
+                    "exists": True,
+                    "is_file": True,
+                    "is_directory": False,
+                    "file_path": str(temp_dir / "README.md")
+                }}],
                 "timestamp": "2024-01-01T12:00:00Z"
             }
         ]
@@ -331,7 +365,12 @@ def test_main():
                 "tool": "read_file",
                 "result": ToolResult(
                     success=True,
-                    data={"content": (temp_dir / "README.md").read_text(encoding="utf-8")},
+                    data={
+                        "content": (temp_dir / "README.md").read_text(encoding="utf-8"),
+                        "file_path": str(temp_dir / "README.md"),
+                        "file_size_bytes": len((temp_dir / "README.md").read_text(encoding="utf-8").encode('utf-8')),
+                        "encoding": "utf-8"
+                    },
                     error_message=None
                 ),
                 "rationale": "README.md 내용 읽기"
@@ -346,7 +385,13 @@ def test_main():
         assert len(response) > 0
         assert "README" in response or "파일" in response
         
-        print(f"Context-aware response: {response}")
+        # 응답 결과를 가독성 좋게 출력
+        print("\n" + "="*80)
+        print(f"[대화 컨텍스트 테스트] LLM 응답 결과 (길이: {len(response)}자)")
+        print("="*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("="*80 + "\n")
 
     def test_generate_response_complex_multi_step_scenario(self, agent, sample_project_structure):
         """복잡한 다단계 작업 시나리오에 대한 응답 생성 테스트"""
@@ -390,8 +435,13 @@ def test_main():
         assert "프로젝트" in response
         assert "분석" in response or "구조" in response
         
-        print(f"Complex analysis response length: {len(response)}")
-        print(f"Response preview: {response[:300]}...")
+        # 복합 분석 응답 결과를 가독성 좋게 출력
+        print("\n" + "="*80)
+        print(f"[복합 분석 테스트] LLM 종합 분석 응답 (길이: {len(response)}자)")
+        print("="*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("="*80 + "\n")
 
     def test_generate_response_korean_content_handling(self, agent, temp_dir):
         """한글 내용 처리에 대한 응답 생성 테스트"""
@@ -445,7 +495,12 @@ result = analyzer.analyze("안녕하세요")
                 "tool": "read_file",
                 "result": ToolResult(
                     success=True,
-                    data={"content": korean_file_content},
+                    data={
+                        "content": korean_file_content,
+                        "file_path": korean_file_path,
+                        "file_size_bytes": len(korean_file_content.encode('utf-8')),
+                        "encoding": "utf-8"
+                    },
                     error_message=None
                 ),
                 "rationale": "한국어 문서 내용 읽기"
@@ -466,4 +521,10 @@ result = analyzer.analyze("안녕하세요")
         # 문서의 주요 내용이 언급되었는지 확인
         assert "자연어" in response or "분석" in response or "프로젝트" in response
         
-        print(f"Korean content response: {response[:200]}...")
+        # 한국어 처리 응답 결과를 가독성 좋게 출력
+        print("\n" + "="*80)
+        print(f"[한국어 처리 테스트] LLM 한국어 응답 결과 (길이: {len(response)}자)")
+        print("="*80)
+        for i, line in enumerate(response.split('\n'), 1):
+            print(f"{i:3d}: {line}")
+        print("="*80 + "\n")

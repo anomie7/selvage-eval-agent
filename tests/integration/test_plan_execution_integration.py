@@ -144,7 +144,12 @@ class TestPlanExecutionIntegration:
         agent.session_state.add_conversation_turn(
             user_message="README.md 파일이 정말 있는지 확인해줘",
             assistant_response="README.md 파일이 존재합니다.",
-            tool_results=[{"tool": "file_exists", "result": {"exists": True, "path": str(readme_file)}}]
+            tool_results=[{"tool": "file_exists", "result": {
+                "exists": True,
+                "is_file": True,
+                "is_directory": False,
+                "file_path": str(readme_file)
+            }}]
         )
         
         # 세 번째 요청: README.md 파일 내용 읽기

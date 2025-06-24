@@ -84,6 +84,9 @@ class TestToolExecutionIntegration:
         })
         assert exists_result.success
         assert exists_result.data["exists"] is True
+        assert exists_result.data["is_file"] is True
+        assert exists_result.data["is_directory"] is False
+        assert exists_result.data["file_path"] == str(temp_dir / "README.md")
         print(f"File exists check: {exists_result.data}")
         
         # 2. 파일 내용 읽기
@@ -160,7 +163,7 @@ class TestToolExecutionIntegration:
             
             print(f"{cmd_info['description']}: {result.success}")
             if result.success:
-                print(f"Output: {result.data.get('output', '')[:100]}")
+                print(f"Output: {result.data.get('stdout', '')[:100]}")
             else:
                 print(f"Error: {result.error_message}")
             
