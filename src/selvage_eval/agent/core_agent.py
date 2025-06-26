@@ -518,6 +518,9 @@ class SelvageEvaluationAgent:
 # 중요 원칙
 - 단계별로 생각하고 행동하세요
 - 이전 단계의 결과를 고려하여 다음 단계를 결정하세요
+- **도구 실행 결과의 실제 데이터를 활용하여 구체적인 응답을 생성하세요**
+- 도구 실행이 성공했다면 "실제 결과 데이터" 섹션의 정보를 바탕으로 정확한 내용을 제공하세요
+- 추측이나 일반적인 예시가 아닌 실제 데이터를 기반으로 응답하세요
 - 작업이 완료되었다고 확신할 때만 TASK_COMPLETE를 사용하세요
 - 안전성을 고려하여 위험한 작업은 거부하세요"""
 
@@ -564,13 +567,33 @@ class SelvageEvaluationAgent:
                 prompt_parts.append(f"  실행한 도구: {len(actions)}개")
                 prompt_parts.append(f"  관찰 결과: {len(observations)}개")
                 
-                # 도구 실행 결과 요약
+                # 도구 실행 결과 상세
                 for obs in observations:
                     tool_name = obs.get('tool', 'Unknown')
                     result = obs.get('result', {})
                     if hasattr(result, 'success'):
                         status = "성공" if result.success else "실패"
                         prompt_parts.append(f"    {tool_name}: {status}")
+                        
+                        # 성공한 경우 실제 데이터도 포함
+                        if result.success and hasattr(result, 'data') and result.data:
+                            try:
+                                # 데이터를 JSON으로 직렬화 시도
+                                data_str = json.dumps(result.data, ensure_ascii=False, indent=6)
+                            except (TypeError, ValueError):
+                                # 직렬화 실패 시 문자열로 변환
+                                data_str = str(result.data)
+                            
+                            # 데이터 크기 제한 (너무 큰 경우 요약)
+                            if len(data_str) > 2000:
+                                data_str = data_str[:2000] + "... (데이터가 길어서 생략됨)"
+                            
+                            prompt_parts.append(f"      실제 결과 데이터:")
+                            prompt_parts.append(f"      {data_str}")
+                        
+                        # 실패한 경우 오류 메시지 포함
+                        elif not result.success and hasattr(result, 'error_message') and result.error_message:
+                            prompt_parts.append(f"      오류 메시지: {result.error_message}")
                     else:
                         prompt_parts.append(f"    {tool_name}: 실행됨")
         
