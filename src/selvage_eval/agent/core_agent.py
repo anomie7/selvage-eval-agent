@@ -162,16 +162,12 @@ class SelvageEvaluationAgent:
 
     def handle_user_message(self, message: str) -> str:
         """
-        개선된 대화형 메시지 처리
+        ReAct 패턴 기반 대화형 메시지 처리
         
         Flow:
         1. 특수 명령어 처리 (/clear, /context)
-        2. 보안 의도 분석 (새로 추가)
-        3. 대화 히스토리를 포함한 실행 계획 수립
-        4. 계획 수준 안전성 검증
-        5. 계획에 따라 도구들 실행  
-        6. 도구 결과를 바탕으로 최종 응답 생성
-        7. 대화 히스토리에 추가
+        2. 보안 의도 분석
+        3. ReAct 루프를 통한 전체 작업 처리 (plan_execution_loop)
         
         Args:
             message: User message
@@ -186,7 +182,7 @@ class SelvageEvaluationAgent:
             return self._handle_special_command(message)
         
         try:
-            # 2. 보안 의도 분석 (새로 추가)
+            # 2. 보안 의도 분석
             security_analysis = self._analyze_security_intent(message)
             if not security_analysis["is_safe"]:
                 response = f"보안상 요청을 처리할 수 없습니다. {security_analysis['reason']}"
@@ -199,38 +195,9 @@ class SelvageEvaluationAgent:
                 )
                 return response
             
-            # 3. 대화 히스토리를 포함한 실행 계획 수립
-            plan = self.plan_execution(message)
-            
-            # 4. 계획 수준 안전성 검증
-            if not self._validate_plan_safety(plan):
-                response = f"보안상 실행할 수 없습니다: {plan.safety_check}"
-                # 오류 마저 히스토리에 기록
-                self.session_state.add_conversation_turn(
-                    user_message=message,
-                    assistant_response=response
-                )
-                return response
-            
-            # 5. 계획에 따라 도구들 실행
-            tool_results = []
-            for tool_call in plan.tool_calls:
-                result = self.execute_tool(tool_call.tool, tool_call.params)
-                tool_results.append({
-                    "tool": tool_call.tool,
-                    "result": result,
-                    "rationale": tool_call.rationale
-                })
-            
-            # 6. 도구 결과를 바탕으로 최종 응답 생성
-            response = self.generate_response(message, plan, tool_results)
-            
-            # 7. 대화 히스토리에 추가
-            self.session_state.add_conversation_turn(
-                user_message=message,
-                assistant_response=response,
-                tool_results=tool_results
-            )
+            # 3. ReAct 루프를 통한 전체 작업 처리
+            # plan_execution_loop가 내부적으로 히스토리 관리까지 처리함
+            response = self.plan_execution_loop(message)
             
             return response
             
@@ -262,6 +229,402 @@ class SelvageEvaluationAgent:
             ListDirectoryTool()
         ]
     
+    def plan_execution_loop(self, user_query: str, max_iterations: int = 25) -> str:
+        """ReAct 패턴 기반 계획 실행 및 응답 생성
+        
+        Think-Act-Observe 사이클을 반복하여 복잡한 작업을 단계별로 완료합니다.
+        
+        Args:
+            user_query: 사용자 질문
+            max_iterations: 최대 반복 횟수 (기본값: 25)
+            
+        Returns:
+            최종 응답 문자열
+        """
+        working_context = {
+            "original_query": user_query,
+            "iteration_history": [],
+            "accumulated_tool_results": []
+        }
+        
+        for iteration in range(max_iterations):
+            # Think: 현재 상황 분석 및 다음 행동 결정
+            agent_decision = self._think_and_decide(working_context)
+            
+            if agent_decision["status"] == "TASK_COMPLETE":
+                final_response = agent_decision["final_response"]
+                # 대화 히스토리에 추가
+                self.session_state.add_conversation_turn(
+                    user_message=user_query,
+                    assistant_response=final_response,
+                    tool_results=working_context["accumulated_tool_results"]
+                )
+                return final_response
+                
+            elif agent_decision["status"] == "NEED_MORE_WORK":
+                # Act: 도구 실행
+                tool_results = self._execute_planned_tools(agent_decision["tool_calls"])
+                
+                # Observe: 결과 반영
+                working_context["iteration_history"].append({
+                    "iteration": iteration + 1,
+                    "thinking": agent_decision["thinking"],
+                    "actions": agent_decision["tool_calls"],
+                    "observations": tool_results
+                })
+                working_context["accumulated_tool_results"].extend(tool_results)
+                
+            elif agent_decision["status"] == "NEED_USER_HELP":
+                feedback_response = agent_decision["user_feedback_request"]
+                self.session_state.add_conversation_turn(
+                    user_message=user_query,
+                    assistant_response=feedback_response,
+                    tool_results=working_context["accumulated_tool_results"]
+                )
+                return feedback_response
+        
+        # 최대 반복 도달
+        max_iterations_response = self._handle_max_iterations_exceeded(working_context)
+        self.session_state.add_conversation_turn(
+            user_message=user_query,
+            assistant_response=max_iterations_response,
+            tool_results=working_context["accumulated_tool_results"]
+        )
+        return max_iterations_response
+
+    def _think_and_decide(self, working_context: Dict[str, Any]) -> Dict[str, Any]:
+        """현재 상황을 분석하고 다음 행동을 결정합니다
+        
+        Args:
+            working_context: 작업 컨텍스트
+            
+        Returns:
+            결정 사항 딕셔너리
+        """
+        # 현재 상태 정보 수집
+        current_state = self._analyze_current_state()
+        
+        # 대화 히스토리 컨텍스트 수집
+        conversation_context = self.session_state.get_conversation_context(include_tool_results=True)
+        
+        # ReAct 프롬프트 구성
+        react_prompt = self._build_react_prompt(working_context, current_state, conversation_context)
+        
+        messages = [{"role": "user", "content": react_prompt}]
+        
+        # LLM 호출 (텍스트 기반 JSON 응답 요청)
+        try:
+            system_instruction = self._build_react_system_prompt()
+            response = self.gemini_client.query(
+                messages=messages,
+                system_instruction=system_instruction,
+                # Function calling 없이 텍스트 응답으로 JSON 받기
+                tools=None
+            )
+            
+            # JSON 응답 파싱 (응답이 문자열인지 객체인지 확인)
+            response_text = response.text if hasattr(response, 'text') else str(response)
+            decision = self._parse_react_decision(response_text)
+            
+            logger.debug(f"ReAct decision for iteration: {decision['status']}")
+            return decision
+            
+        except Exception as e:
+            logger.error(f"Error in _think_and_decide: {e}")
+            return {
+                "status": "NEED_USER_HELP",
+                "thinking": f"오류가 발생했습니다: {str(e)}",
+                "user_feedback_request": f"분석 중 오류가 발생했습니다: {str(e)}. 다시 시도하거나 더 간단한 요청을 해주세요."
+            }
+
+    def _execute_planned_tools(self, tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """계획된 도구들을 실행합니다
+        
+        Args:
+            tool_calls: 실행할 도구 호출 목록
+            
+        Returns:
+            도구 실행 결과 목록
+        """
+        results = []
+        
+        for tool_call in tool_calls:
+            try:
+                tool_name = tool_call.get("tool", "")
+                params = tool_call.get("params", {})
+                rationale = tool_call.get("rationale", "")
+                
+                if not tool_name:
+                    logger.warning("도구 이름이 없는 tool_call이 있습니다")
+                    continue
+                
+                # 도구 실행
+                result = self.execute_tool(tool_name, params)
+                
+                # 결과 포맷팅
+                tool_result = {
+                    "tool": tool_name,
+                    "params": params,
+                    "rationale": rationale,
+                    "result": result
+                }
+                
+                results.append(tool_result)
+                
+                logger.debug(f"도구 실행 완료: {tool_name} - 성공: {result.success}")
+                
+            except Exception as e:
+                logger.error(f"도구 실행 중 오류 발생: {tool_call} - {e}")
+                
+                # 오류 결과도 기록
+                error_result = ToolResult(
+                    success=False,
+                    data=None,
+                    error_message=str(e)
+                )
+                
+                tool_result = {
+                    "tool": tool_call.get("tool", "unknown"),
+                    "params": tool_call.get("params", {}),
+                    "rationale": tool_call.get("rationale", ""),
+                    "result": error_result
+                }
+                
+                results.append(tool_result)
+        
+        return results
+
+    def _handle_max_iterations_exceeded(self, working_context: Dict[str, Any]) -> str:
+        """최대 반복 횟수 도달 시 처리합니다
+        
+        Args:
+            working_context: 작업 컨텍스트
+            
+        Returns:
+            최대 반복 도달 응답
+        """
+        original_query = working_context.get("original_query", "알 수 없는 요청")
+        iteration_count = len(working_context.get("iteration_history", []))
+        
+        return f"죄송합니다. '{original_query}' 요청을 처리하는 데 최대 반복 횟수({iteration_count})에 도달했습니다. " \
+               f"작업이 복잡하거나 추가 정보가 필요할 수 있습니다. 더 구체적으로 요청해 주시거나 단계별로 나누어 요청해 주세요."
+
+    def _build_react_system_prompt(self) -> str:
+        """ReAct 패턴용 시스템 프롬프트를 구성합니다"""
+        
+        available_tools = self._get_available_tools()
+        
+        # 도구별 상세 정보 구성 (파라미터 스키마 포함)
+        tools_details = []
+        for tool in available_tools:
+            tool_detail = f"""
+## {tool.name}
+- **설명**: {tool.description}
+- **파라미터**: {json.dumps(tool.parameters_schema, ensure_ascii=False, indent=2)}"""
+            
+            # 도구별 사용 예시 추가
+            if tool.name == "list_directory":
+                tool_detail += f"""
+- **사용 예시**: 
+  ```json
+  {{
+    "tool": "list_directory",
+    "params": {{"directory_path": "{self.work_dir}"}},
+    "rationale": "현재 작업 디렉토리의 파일 목록 확인"
+  }}
+  ```"""
+            elif tool.name == "read_file":
+                tool_detail += f"""
+- **사용 예시**:
+  ```json
+  {{
+    "tool": "read_file", 
+    "params": {{"file_path": "{self.work_dir}/README.md"}},
+    "rationale": "README 파일 내용 읽기"
+  }}
+  ```"""
+            elif tool.name == "file_exists":
+                tool_detail += f"""
+- **사용 예시**:
+  ```json
+  {{
+    "tool": "file_exists",
+    "params": {{"file_path": "{self.work_dir}/config.json"}},
+    "rationale": "설정 파일 존재 여부 확인"
+  }}
+  ```"""
+            elif tool.name == "execute_safe_command":
+                tool_detail += f"""
+- **사용 예시**:
+  ```json
+  {{
+    "tool": "execute_safe_command",
+    "params": {{"command": "git status", "working_directory": "{self.work_dir}"}},
+    "rationale": "Git 상태 확인"
+  }}
+  ```"""
+            
+            tools_details.append(tool_detail)
+        
+        tools_text = "\n".join(tools_details)
+        
+        return f"""당신은 ReAct 패턴을 사용하는 Selvage 평가 에이전트입니다.
+
+# 작업 환경
+- **현재 작업 디렉토리**: {self.work_dir}
+- **중요**: 파일이나 디렉토리를 다룰 때는 반드시 절대 경로를 사용하세요
+- **예시**: "프로젝트 파일 목록"을 요청받으면 `{self.work_dir}`를 직접 사용하세요
+- **금지**: 상대 경로 '.' 사용 금지 - 항상 {self.work_dir} 사용
+
+# 사용 가능한 도구들
+{tools_text}
+
+# ReAct 패턴 지침
+사용자의 요청을 분석하고 다음 JSON 형태로 응답하세요:
+
+1. 작업이 완료된 경우:
+```json
+{{
+  "thinking": "상황 분석 및 추론 과정",
+  "status": "TASK_COMPLETE",
+  "final_response": "사용자에게 제공할 최종 응답"
+}}
+```
+
+2. 더 많은 작업이 필요한 경우:
+```json
+{{
+  "thinking": "상황 분석 및 추론 과정",
+  "status": "NEED_MORE_WORK",
+  "tool_calls": [
+    {{
+      "tool": "도구_이름",
+      "params": {{"매개변수": "값"}},
+      "rationale": "도구를 사용하는 이유"
+    }}
+  ]
+}}
+```
+
+3. 사용자 도움이 필요한 경우:
+```json
+{{
+  "thinking": "상황 분석 및 추론 과정",
+  "status": "NEED_USER_HELP",
+  "user_feedback_request": "사용자에게 요청할 도움 메시지"
+}}
+```
+
+# 중요 원칙
+- 단계별로 생각하고 행동하세요
+- 이전 단계의 결과를 고려하여 다음 단계를 결정하세요
+- 작업이 완료되었다고 확신할 때만 TASK_COMPLETE를 사용하세요
+- 안전성을 고려하여 위험한 작업은 거부하세요"""
+
+    def _build_react_prompt(
+        self, 
+        working_context: Dict[str, Any], 
+        current_state: Dict[str, Any], 
+        conversation_context: List[Dict[str, Any]]
+    ) -> str:
+        """ReAct 프롬프트를 구성합니다"""
+        
+        prompt_parts = []
+        
+        # 사용자 원본 질문
+        prompt_parts.append(f"# 사용자 질문\n{working_context['original_query']}")
+        
+        # 현재 상태 정보
+        try:
+            current_state_json = json.dumps(current_state, ensure_ascii=False, indent=2)
+        except TypeError:
+            current_state_json = str(current_state)
+        prompt_parts.append(f"\n# 현재 상태\n{current_state_json}")
+        
+        # 이전 대화 컨텍스트
+        if conversation_context:
+            prompt_parts.append("\n# 이전 대화 맥락")
+            for i, context in enumerate(conversation_context[-3:], 1):  # 최근 3개만
+                prompt_parts.append(f"대화 {i}:")
+                prompt_parts.append(f"  사용자: {context.get('user_message', '').strip()}")
+                prompt_parts.append(f"  어시스턴트: {context.get('assistant_response', '').strip()}")
+        
+        # 현재 반복의 히스토리
+        iteration_history = working_context.get('iteration_history', [])
+        if iteration_history:
+            prompt_parts.append("\n# 이번 요청의 진행 과정")
+            for entry in iteration_history[-5:]:  # 최근 5개 반복만
+                iteration = entry.get('iteration', 0)
+                thinking = entry.get('thinking', '')
+                actions = entry.get('actions', [])
+                observations = entry.get('observations', [])
+                
+                prompt_parts.append(f"반복 {iteration}:")
+                prompt_parts.append(f"  생각: {thinking}")
+                prompt_parts.append(f"  실행한 도구: {len(actions)}개")
+                prompt_parts.append(f"  관찰 결과: {len(observations)}개")
+                
+                # 도구 실행 결과 요약
+                for obs in observations:
+                    tool_name = obs.get('tool', 'Unknown')
+                    result = obs.get('result', {})
+                    if hasattr(result, 'success'):
+                        status = "성공" if result.success else "실패"
+                        prompt_parts.append(f"    {tool_name}: {status}")
+                    else:
+                        prompt_parts.append(f"    {tool_name}: 실행됨")
+        
+        prompt_parts.append("\n# 지시사항\n위 정보를 바탕으로 현재 상황을 분석하고 다음 행동을 JSON 형태로 결정해주세요.")
+        
+        return "\n".join(prompt_parts)
+
+    def _parse_react_decision(self, response_text: str) -> Dict[str, Any]:
+        """LLM 응답에서 ReAct 결정을 파싱합니다"""
+        
+        try:
+            # JSON 추출 및 파싱
+            decision = self._extract_json_from_response(response_text)
+            
+            # 필수 필드 검증
+            if "status" not in decision:
+                raise ValueError("status 필드가 없습니다")
+            
+            if "thinking" not in decision:
+                decision["thinking"] = "분석 과정이 제공되지 않았습니다"
+            
+            # 상태별 필수 필드 검증
+            status = decision["status"]
+            
+            if status == "TASK_COMPLETE":
+                if "final_response" not in decision:
+                    raise ValueError("TASK_COMPLETE 상태에는 final_response가 필요합니다")
+            
+            elif status == "NEED_MORE_WORK":
+                if "tool_calls" not in decision:
+                    raise ValueError("NEED_MORE_WORK 상태에는 tool_calls가 필요합니다")
+                if not isinstance(decision["tool_calls"], list):
+                    raise ValueError("tool_calls는 리스트여야 합니다")
+            
+            elif status == "NEED_USER_HELP":
+                if "user_feedback_request" not in decision:
+                    raise ValueError("NEED_USER_HELP 상태에는 user_feedback_request가 필요합니다")
+            
+            else:
+                raise ValueError(f"알 수 없는 status: {status}")
+            
+            return decision
+            
+        except Exception as e:
+            logger.error(f"Failed to parse ReAct decision: {e}")
+            logger.error(f"Response text: {response_text}")
+            
+            # 파싱 실패 시 안전한 기본값 반환
+            return {
+                "status": "NEED_USER_HELP",
+                "thinking": f"응답 파싱에 실패했습니다: {str(e)}",
+                "user_feedback_request": f"죄송합니다. 요청을 처리하는 중 내부 오류가 발생했습니다. 다시 시도해 주세요."
+            }
+
     def plan_execution(self, user_query: str) -> ExecutionPlan:
         """Query analysis and execution planning via LLM
         
@@ -341,44 +704,6 @@ class SelvageEvaluationAgent:
             logger.error(f"Error in plan_execution: {e}")
             raise e
     
-    
-    def generate_response(self, user_query: str, plan: ExecutionPlan, tool_results: List[Dict]) -> str:
-        """도구 실행 결과를 바탕으로 사용자에게 제공할 최종 응답 생성
-        
-        Args:
-            user_query: 사용자 질문
-            plan: 실행 계획
-            tool_results: 도구 실행 결과
-            
-        Returns:
-            사용자 응답
-        """
-        # 대화 컨텍스트 수집
-        conversation_context = self.session_state.get_conversation_context()
-        
-        # 시스템 프롬프트 구성
-        system_prompt = self._build_response_system_prompt(conversation_context)
-        
-        # 응답 생성 프롬프트 구성
-        response_prompt = self._build_response_generation_prompt(
-            user_query, plan, tool_results
-        )
-        
-        messages = [{"role": "user", "content": response_prompt}]
-        
-        # LLM 호출
-        try:
-            response = self.gemini_client.query(
-                messages=messages,
-                system_instruction=system_prompt,
-            )
-            
-            logger.debug(f"Generated LLM-based response for query: {user_query[:50]}...")
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error in generate_response: {e}")
-            raise e
     
     
     def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
@@ -762,96 +1087,6 @@ class SelvageEvaluationAgent:
         
         return execution_plan
     
-    def _build_response_system_prompt(
-        self,
-        conversation_context: Optional[List[Dict[str, Any]]] = None
-    ) -> str:
-        """응답 생성용 시스템 프롬프트를 구성합니다
-        
-        Args:
-            conversation_context: 대화 컨텍스트 (선택사항)
-            
-        Returns:
-            시스템 프롬프트 문자열
-        """
-        system_prompt_parts = [
-            "# ROLE",
-            "사용자에게 도구 실행 결과를 바탕으로 명확하고 유용한 답변을 제공하는 어시스턴트입니다.",
-            "",
-            "# WORKING ENVIRONMENT",
-            f"- 현재 작업 디렉토리: {self.work_dir}",
-            "- '프로젝트'는 현재 작업 디렉토리를 의미합니다",
-            "- 상대 경로는 작업 디렉토리 기준으로 해석합니다",
-            "",
-            "# GUIDELINES",
-            "- 핵심 정보를 명확히 전달",
-            "- 필요시 표나 리스트 형태로 구조화",
-            "- 다음 단계 제안 (해당되는 경우)",
-            "- 한국어로 자연스럽게 응답"
-        ]
-        
-        # 대화 컨텍스트가 있는 경우 포함
-        if conversation_context and len(conversation_context) > 0:
-            system_prompt_parts.extend([
-                "",
-                "# CONVERSATION CONTEXT",
-                "이전 대화 내용을 참고하여 문맥에 맞는 응답을 생성하세요:",
-                ""
-            ])
-            
-            for i, turn in enumerate(conversation_context, 1):
-                system_prompt_parts.append(f"**대화 {i}:**")
-                system_prompt_parts.append(f"사용자: {turn.get('user_message', '').strip()}")
-                system_prompt_parts.append(f"어시스턴트: {turn.get('assistant_response', '').strip()}")
-                system_prompt_parts.append("")
-        
-        return "\n".join(system_prompt_parts)
-
-    def _build_response_generation_prompt(
-        self,
-        user_query: str,
-        execution_plan: ExecutionPlan,
-        tool_results: List[Dict[str, Any]],
-    ) -> str:
-        """응답 생성용 프롬프트를 구성합니다"""
-        
-        # tool_results를 JSON 직렬화 가능한 형태로 변환
-        serializable_results = []
-        for result in tool_results:
-            serializable_result = {
-                "tool": result["tool"],
-                "rationale": result["rationale"]
-            }
-            
-            # ToolResult 객체를 딕셔너리로 변환
-            tool_result = result["result"]
-            if hasattr(tool_result, '__dict__'):
-                serializable_result["result"] = {
-                    "success": tool_result.success,
-                    "data": tool_result.data,
-                    "error_message": tool_result.error_message,
-                    "execution_time": tool_result.execution_time,
-                    "metadata": tool_result.metadata
-                }
-            else:
-                serializable_result["result"] = tool_result
-            
-            serializable_results.append(serializable_result)
-        
-        response_prompt = f"""
-# CONTEXT
-사용자 질문: {user_query}
-의도 분석: {execution_plan.intent_summary}
-예상 결과: {execution_plan.expected_outcome}
-
-# TOOL EXECUTION RESULTS
-{json.dumps(serializable_results, ensure_ascii=False, indent=2)}
-
-# TASK
-도구 실행 결과를 바탕으로 사용자가 이해하기 쉬운 답변을 생성하세요.
-        """
-        
-        return response_prompt
     
     def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
         """LLM 응답에서 JSON을 추출하고 파싱합니다
