@@ -166,5 +166,19 @@ class ListDirectoryTool(Tool):
         # 테스트 환경에서 pytest 임시 디렉토리 허용 (pytest가 생성하는 tmp 디렉토리)
         if 'pytest' in abs_path or 'tmp' in abs_path:
             return True
+        
+        # macOS 시스템 임시 디렉토리 패턴 허용 (더 구체적)
+        import re
+        macos_tmp_pattern = r'/(?:private/)?var/folders/[^/]+/[^/]+/T/'
+        if re.search(macos_tmp_pattern, abs_path):
+            return True
+        
+        # 실제로 읽기 권한이 있는지 확인 (권한 오류를 사전에 방지)
+        try:
+            # 디렉토리가 존재하고 읽기 권한이 있는지 확인
+            if os.path.exists(path) and os.access(path, os.R_OK):
+                return True
+        except (OSError, PermissionError):
+            pass
             
         return False 

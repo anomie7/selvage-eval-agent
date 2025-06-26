@@ -26,7 +26,7 @@ class TestPlanExecutionIntegration:
             pytest.skip("GEMINI_API_KEY가 설정되지 않아 통합 테스트를 건너뜁니다")
         
         config = Mock()
-        config.agent_model = "gemini-2.0-flash-exp"
+        config.agent_model = "gemini-2.5-pro"
         config.review_models = []
         config.target_repositories = []
         config.commits_per_repo = 10

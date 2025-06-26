@@ -339,7 +339,15 @@ class SessionState:
         Returns:
             추정된 토큰 수
         """
-        text = json.dumps(content, ensure_ascii=False) if isinstance(content, dict) else str(content)
+        # JSON 직렬화 시도, 실패시 문자열 변환
+        if isinstance(content, dict):
+            try:
+                text = json.dumps(content, ensure_ascii=False)
+            except TypeError:
+                # ToolResult 등 직렬화 불가능한 객체가 있는 경우
+                text = str(content)
+        else:
+            text = str(content)
         
         # 대략적인 추정 (영어: 4글자당 1토큰, 한국어: 2글자당 1토큰)
         korean_chars = sum(1 for c in text if ord(c) > 127)

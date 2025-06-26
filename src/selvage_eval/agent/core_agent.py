@@ -90,16 +90,88 @@ class SelvageEvaluationAgent:
         logger.info(f"Reset from session {old_session_id} to new session: {self.session_state.session_id}")
         return self.session_state.session_id
     
+    def _analyze_security_intent(self, message: str) -> Dict[str, Any]:
+        """사용자 메시지의 보안 의도를 분석합니다
+        
+        Args:
+            message: 사용자 메시지
+            
+        Returns:
+            보안 분석 결과 {'is_safe': bool, 'risk_level': str, 'reason': str}
+        """
+        # 확장된 보안 키워드 리스트
+        high_risk_keywords = [
+            # 직접적 위험 명령어
+            "rm -rf", "sudo", "delete", "삭제", "제거",
+            # 시스템 파일 관련
+            "/etc/passwd", "/etc/shadow", "시스템 파일",
+            # 인증 정보 관련
+            "패스워드", "비밀번호", "password", "credential", "secret", "token", "key", "api키",
+            # 권한 관련
+            "chmod", "chown", "권한 변경",
+            # 네트워크 관련
+            "curl", "wget", "download", "다운로드"
+        ]
+        
+        medium_risk_keywords = [
+            "파일 읽기", "내용 확인", "접근", "실행"
+        ]
+        
+        message_lower = message.lower()
+        
+        # 고위험 키워드 검사
+        for keyword in high_risk_keywords:
+            if keyword.lower() in message_lower:
+                return {
+                    "is_safe": False,
+                    "risk_level": "high",
+                    "reason": f"보안 위험 키워드 감지: '{keyword}'"
+                }
+        
+        # 의심스러운 패턴 검사 (더 구체적으로)
+        suspicious_patterns = [
+            r'(?:패스워드|비밀번호|password)\s*(?:파일|file)',
+            r'/etc/\w+',
+            r'sudo\s+\w+',
+            r'rm\s+-[rf]+',
+            r'(?:패스워드|비밀번호|credential|secret|api키|token)\s*(?:읽어|보여|알려)',
+        ]
+        
+        for pattern in suspicious_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return {
+                    "is_safe": False,
+                    "risk_level": "high",
+                    "reason": f"의심스러운 패턴 감지: {pattern}"
+                }
+        
+        # 중위험 키워드 검사
+        for keyword in medium_risk_keywords:
+            if keyword.lower() in message_lower:
+                return {
+                    "is_safe": True,
+                    "risk_level": "medium",
+                    "reason": f"주의 필요: '{keyword}'"
+                }
+        
+        return {
+            "is_safe": True,
+            "risk_level": "low",
+            "reason": "안전한 요청으로 판단됨"
+        }
+
     def handle_user_message(self, message: str) -> str:
         """
         개선된 대화형 메시지 처리
         
         Flow:
         1. 특수 명령어 처리 (/clear, /context)
-        2. 대화 히스토리를 포함한 실행 계획 수립
-        3. 계획에 따라 도구들 실행  
-        4. 도구 결과를 바탕으로 최종 응답 생성
-        5. 대화 히스토리에 추가
+        2. 보안 의도 분석 (새로 추가)
+        3. 대화 히스토리를 포함한 실행 계획 수립
+        4. 계획 수준 안전성 검증
+        5. 계획에 따라 도구들 실행  
+        6. 도구 결과를 바탕으로 최종 응답 생성
+        7. 대화 히스토리에 추가
         
         Args:
             message: User message
@@ -109,15 +181,28 @@ class SelvageEvaluationAgent:
         """
         self.is_interactive_mode = True
         
-        # 특수 명령어 처리 (단순히 /로 시작하는 게 아니라 실제 명령어인지 확인)
+        # 1. 특수 명령어 처리 (단순히 /로 시작하는 게 아니라 실제 명령어인지 확인)
         if message.strip().startswith('/') and message.strip().split()[0] in ['/clear', '/context']:
             return self._handle_special_command(message)
         
         try:
-            # 1. 대화 히스토리를 포함한 실행 계획 수립
+            # 2. 보안 의도 분석 (새로 추가)
+            security_analysis = self._analyze_security_intent(message)
+            if not security_analysis["is_safe"]:
+                response = f"보안상 요청을 처리할 수 없습니다. {security_analysis['reason']}"
+                logger.warning(f"Security risk detected: {security_analysis['reason']} for message: {message}")
+                
+                # 보안 위험 응답도 히스토리에 기록
+                self.session_state.add_conversation_turn(
+                    user_message=message,
+                    assistant_response=response
+                )
+                return response
+            
+            # 3. 대화 히스토리를 포함한 실행 계획 수립
             plan = self.plan_execution(message)
             
-            # 2. 안전성 검증
+            # 4. 계획 수준 안전성 검증
             if not self._validate_plan_safety(plan):
                 response = f"보안상 실행할 수 없습니다: {plan.safety_check}"
                 # 오류 마저 히스토리에 기록
@@ -127,7 +212,7 @@ class SelvageEvaluationAgent:
                 )
                 return response
             
-            # 3. 계획에 따라 도구들 실행
+            # 5. 계획에 따라 도구들 실행
             tool_results = []
             for tool_call in plan.tool_calls:
                 result = self.execute_tool(tool_call.tool, tool_call.params)
@@ -137,10 +222,10 @@ class SelvageEvaluationAgent:
                     "rationale": tool_call.rationale
                 })
             
-            # 4. 도구 결과를 바탕으로 최종 응답 생성
+            # 6. 도구 결과를 바탕으로 최종 응답 생성
             response = self.generate_response(message, plan, tool_results)
             
-            # 5. 대화 히스토리에 추가
+            # 7. 대화 히스토리에 추가
             self.session_state.add_conversation_turn(
                 user_message=message,
                 assistant_response=response,
@@ -150,7 +235,9 @@ class SelvageEvaluationAgent:
             return response
             
         except Exception as e:
+            import traceback
             logger.error(f"Error handling user message: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             error_response = f"메시지 처리 중 오류가 발생했습니다: {str(e)}"
             
             # 오류 상황도 히스토리에 기록
@@ -187,16 +274,49 @@ class SelvageEvaluationAgent:
         # 현재 상태 정보 수집
         current_state = self._analyze_current_state()
         
-        # 대화 히스토리 컨텍스트 수집
-        conversation_context = self.session_state.get_conversation_context()
+        # 대화 히스토리 컨텍스트 수집 (도구 실행 결과 포함)
+        conversation_context = self.session_state.get_conversation_context(include_tool_results=True)
         
-        # 프롬프트 구성
+        # 프롬프트 구성 (current_state를 안전하게 직렬화)
+        try:
+            current_state_json = json.dumps(current_state, ensure_ascii=False, indent=2)
+        except TypeError as e:
+            # ToolResult 등 직렬화 불가능한 객체가 있는 경우 대안 처리
+            logger.warning(f"Current state contains non-serializable objects: {e}")
+            current_state_json = str(current_state)
+        
+        content_parts = [f"현재 상태: {current_state_json}"]
+        
+        # 대화 컨텍스트가 있으면 포함
+        if conversation_context and len(conversation_context) > 0:
+            content_parts.append("\n이전 대화 맥락:")
+            for i, context in enumerate(conversation_context, 1):
+                content_parts.append(f"  대화 {i}:")
+                content_parts.append(f"    사용자: {context.get('user_message', '').strip()}")
+                content_parts.append(f"    어시스턴트: {context.get('assistant_response', '').strip()}")
+                
+                # 도구 실행 결과가 있으면 포함
+                if context.get('tool_results'):
+                    content_parts.append("    실행된 도구:")
+                    for tool_result in context['tool_results']:
+                        tool_name = tool_result.get('tool', '')
+                        result_data = tool_result.get('result', {})
+                        
+                        # ToolResult 객체를 안전하게 처리
+                        if hasattr(result_data, 'success') and hasattr(result_data, 'data'):
+                            # ToolResult 객체인 경우
+                            if result_data.success:
+                                content_parts.append(f"      - {tool_name}: 성공 - {result_data.data}")
+                            else:
+                                content_parts.append(f"      - {tool_name}: 실패 - {result_data.error_message}")
+                        else:
+                            # 이미 직렬화된 데이터인 경우
+                            content_parts.append(f"      - {tool_name}: {result_data}")
+        
+        content_parts.append(f"\n사용자 쿼리: {user_query}")
+        
         messages = [
-            {"role": "user", "content": f"""
-현재 상태: {json.dumps(current_state, ensure_ascii=False, indent=2)}
-
-사용자 쿼리: {user_query}
-            """}
+            {"role": "user", "content": "\n".join(content_parts)}
         ]
         
         # 사용 가능한 도구들 가져오기
@@ -590,6 +710,11 @@ class SelvageEvaluationAgent:
 - 현재 작업 디렉토리: {self.work_dir}
 - "프로젝트"는 현재 작업 디렉토리를 의미합니다
 - 상대 경로는 작업 디렉토리 기준으로 해석합니다
+
+# 대화 맥락 활용
+- 이전 대화 내용과 도구 실행 결과를 참고하여 사용자 요청을 이해하세요
+- "그 파일", "해당 디렉토리" 등의 참조 표현은 이전 대화에서 언급된 대상을 의미합니다
+- 사용자가 명시적으로 파일/경로를 지정하지 않았다면 이전 맥락을 활용하세요
 
 사용자의 의도를 파악하고 필요한 작업을 수행하기 위해 제공된 도구들을 사용하세요.
 각 도구 호출 시 명확한 이유와 함께 적절한 파라미터를 제공해주세요.
