@@ -250,7 +250,7 @@ class SessionState:
         
         logger.debug(f"Added conversation turn {turn['turn_id']}")
     
-    def get_conversation_context(self, include_tool_results: bool = False) -> List[Dict[str, Any]]:
+    def get_conversation_context(self) -> List[Dict[str, Any]]:
         """현재 컨텍스트 반환 (토큰 제한 고려)
         
         Args:
@@ -272,11 +272,9 @@ class SessionState:
             turn_context = {
                 "user_message": turn["user_message"],
                 "assistant_response": turn["assistant_response"],
-                "timestamp": turn["timestamp"]
+                "timestamp": turn["timestamp"],
+                "tool_results": turn["tool_results"]
             }
-            
-            if include_tool_results and turn["tool_results"]:
-                turn_context["tool_results"] = turn["tool_results"]
             
             # 토큰 수 계산
             turn_tokens = self._count_tokens(turn_context)

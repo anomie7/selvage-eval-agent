@@ -305,7 +305,7 @@ class SelvageEvaluationAgent:
         current_state = self._analyze_current_state()
         
         # 대화 히스토리 컨텍스트 수집
-        conversation_context = self.session_state.get_conversation_context(include_tool_results=True)
+        conversation_context = self.session_state.get_conversation_context()
         
         # ReAct 프롬프트 구성
         react_prompt = self._build_react_prompt(working_context, current_state, conversation_context)
@@ -547,7 +547,7 @@ class SelvageEvaluationAgent:
         # 이전 대화 컨텍스트
         if conversation_context:
             prompt_parts.append("\n# 이전 대화 맥락")
-            for i, context in enumerate(conversation_context[-3:], 1):  # 최근 3개만
+            for i, context in enumerate(conversation_context, 1):  # 최근 3개만
                 prompt_parts.append(f"대화 {i}:")
                 prompt_parts.append(f"  사용자: {context.get('user_message', '').strip()}")
                 prompt_parts.append(f"  어시스턴트: {context.get('assistant_response', '').strip()}")
