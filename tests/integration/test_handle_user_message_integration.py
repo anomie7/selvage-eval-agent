@@ -457,46 +457,196 @@ def test_main():
             # 원래 메서드 복원
             agent.plan_execution_loop = original_plan_execution
 
-    def test_handle_user_message_multiple_sessions(self, agent: SelvageEvaluationAgent, sample_project_structure):
-        """다중 세션 대화 테스트"""
+    def test_handle_user_message_list_project_files(self, agent: SelvageEvaluationAgent, sample_project_structure):
+        """프로젝트 파일 목록 조회 테스트"""
         # Given: 샘플 프로젝트 구조
         agent.work_dir = str(sample_project_structure)
         
-        # When: 여러 연속된 대화 진행
-        queries_and_responses = []
+        # When: 프로젝트 파일 목록 질문
+        query = "프로젝트에 어떤 파일들이 있나요?"
+        response = agent.handle_user_message(query)
         
-        queries = [
-            "프로젝트에 어떤 파일들이 있나요?",
-            "README.md의 내용을 요약해주세요",
-            "config.json에는 어떤 설정이 있나요?",
-            "src 디렉토리 구조를 설명해주세요"
+        # Then: 응답 기본 검증
+        assert isinstance(response, str)
+        assert len(response) > 0
+        
+        # 예상 최상위 파일들과 디렉토리가 응답에 포함되었는지 확인
+        expected_files = ["README.md", "config.json"]
+        expected_directories = ["src", "tests"]
+        response_lower = response.lower()
+        
+        # 최상위 파일들 확인
+        for expected_file in expected_files:
+            assert expected_file.lower() in response_lower, f"파일 '{expected_file}'이 응답에 포함되지 않음: {response}"
+        
+        # 디렉토리들 확인
+        for expected_dir in expected_directories:
+            assert expected_dir.lower() in response_lower, f"디렉토리 '{expected_dir}'이 응답에 포함되지 않음: {response}"
+        
+        # 파일/디렉토리 구조 관련 키워드 확인
+        structure_keywords = ["파일", "디렉토리"]
+        found_keywords = [keyword for keyword in structure_keywords if keyword in response_lower]
+        assert len(found_keywords) >= 1, f"구조 관련 키워드가 부족함. 발견된 키워드: {found_keywords}"
+        
+        # 대화 히스토리 확인
+        assert len(agent.session_state.conversation_history) == 1
+        history_entry = agent.session_state.conversation_history[0]
+        assert history_entry["user_message"] == query
+        assert history_entry["assistant_response"] == response
+        
+        print(f"\n[파일 목록 테스트] 질문: {query}")
+        print(f"응답 (길이: {len(response)}자): {response[:200]}...")
+        print(f"발견된 파일들: {[f for f in expected_files if f.lower() in response_lower]}")
+        print(f"발견된 디렉토리들: {[d for d in expected_directories if d.lower() in response_lower]}")
+        print("=" * 80)
+
+    def test_handle_user_message_summarize_readme(self, agent: SelvageEvaluationAgent, sample_project_structure):
+        """README.md 내용 요약 테스트"""
+        # Given: 샘플 프로젝트 구조
+        agent.work_dir = str(sample_project_structure)
+        
+        # When: README.md 요약 질문
+        query = "README.md의 내용을 요약해주세요"
+        response = agent.handle_user_message(query)
+        
+        # Then: 응답 기본 검증
+        assert isinstance(response, str)
+        assert len(response) > 0
+        
+        # README.md의 핵심 내용이 응답에 포함되었는지 확인
+        readme_keywords = [
+            "테스트 프로젝트",  # 제목에서
+            "selvage",         # 내용에서 
+            "구조",            # 구조 섹션에서
+            "src",             # 구조 설명에서
+            "tests",           # 구조 설명에서
+            "config.json",     # 구조 설명에서
+            "기능"             # 기능 섹션에서
         ]
         
-        for query in queries:
-            response = agent.handle_user_message(query)
-            queries_and_responses.append((query, response))
-            
-            # 각 응답이 적절한지 확인
-            assert isinstance(response, str)
-            assert len(response) > 0
+        response_lower = response.lower()
+        found_keywords = [keyword for keyword in readme_keywords if keyword.lower() in response_lower]
         
-        # Then: 모든 대화가 히스토리에 누적되었는지 확인
-        assert len(agent.session_state.conversation_history) == len(queries)
+        # 최소 4개 이상의 키워드가 포함되어야 함 (적절한 요약으로 판단)
+        assert len(found_keywords) >= 4, f"README 핵심 키워드가 부족함. 발견된 키워드: {found_keywords}, 전체 응답: {response}"
         
-        # 각 히스토리 엔트리 검증
-        for i, (query, response) in enumerate(queries_and_responses):
-            history_entry = agent.session_state.conversation_history[i]
-            assert history_entry["user_message"] == query
-            assert history_entry["assistant_response"] == response
-            assert "tool_results" in history_entry
+        # 요약 특성 확인 - 너무 짧거나 너무 길지 않아야 함
+        assert 50 <= len(response) <= 1000, f"요약 길이가 부적절함 (길이: {len(response)}자): {response}"
         
-        # 다중 세션 결과 출력
-        print(f"\n[다중 세션 테스트] 총 {len(queries_and_responses)}개 대화")
-        for i, (query, response) in enumerate(queries_and_responses, 1):
-            print(f"\n--- 대화 {i} ---")
-            print(f"질문: {query}")
-            print(f"응답 (길이: {len(response)}자): {response[:100]}...")
-            print("=" * 80)
+        # 대화 히스토리 확인
+        assert len(agent.session_state.conversation_history) == 1
+        history_entry = agent.session_state.conversation_history[0]
+        assert history_entry["user_message"] == query
+        assert history_entry["assistant_response"] == response
+        
+        print(f"\n[README 요약 테스트] 질문: {query}")
+        print(f"응답 (길이: {len(response)}자): {response[:300]}...")
+        print(f"발견된 키워드들: {found_keywords}")
+        print("=" * 80)
+
+    def test_handle_user_message_config_settings(self, agent: SelvageEvaluationAgent, sample_project_structure):
+        """config.json 설정 조회 테스트"""
+        # Given: 샘플 프로젝트 구조
+        agent.work_dir = str(sample_project_structure)
+        
+        # When: config.json 설정 질문
+        query = "config.json에는 어떤 설정이 있나요?"
+        response = agent.handle_user_message(query)
+        
+        # Then: 응답 기본 검증
+        assert isinstance(response, str)
+        assert len(response) > 0
+        
+        # config.json의 핵심 설정값들이 응답에 포함되었는지 확인
+        config_keywords = [
+            "test-project",    # project_name
+            "1.0.0",          # version
+            "테스트 작성자",     # author
+            "pytest",         # dependencies
+            "mock",           # dependencies
+            "통합 테스트"       # description 일부
+        ]
+        
+        response_lower = response.lower()
+        found_keywords = [keyword for keyword in config_keywords if keyword.lower() in response_lower]
+        
+        # 최소 4개 이상의 설정 관련 키워드가 포함되어야 함
+        assert len(found_keywords) >= 4, f"config.json 핵심 설정값이 부족함. 발견된 키워드: {found_keywords}, 전체 응답: {response}"
+        
+        # 설정 파일 관련 키워드 확인
+        config_structure_keywords = ["설정", "project", "version", "dependencies"]
+        found_structure_keywords = [keyword for keyword in config_structure_keywords if keyword.lower() in response_lower]
+        assert len(found_structure_keywords) >= 2, f"설정 구조 키워드가 부족함. 발견된 키워드: {found_structure_keywords}"
+        
+        # JSON 형태의 내용을 다루고 있는지 확인 (JSON, 설정 등의 키워드)
+        json_indicators = ["json", "설정", "구성", "config"]
+        found_json_indicators = [indicator for indicator in json_indicators if indicator.lower() in response_lower]
+        assert len(found_json_indicators) >= 1, f"JSON/설정 관련 키워드가 없음. 발견된 키워드: {found_json_indicators}"
+        
+        # 대화 히스토리 확인
+        assert len(agent.session_state.conversation_history) == 1
+        history_entry = agent.session_state.conversation_history[0]
+        assert history_entry["user_message"] == query
+        assert history_entry["assistant_response"] == response
+        
+        print(f"\n[config.json 설정 테스트] 질문: {query}")
+        print(f"응답 (길이: {len(response)}자): {response[:300]}...")
+        print(f"발견된 설정값들: {found_keywords}")
+        print(f"발견된 구조 키워드들: {found_structure_keywords}")
+        print("=" * 80)
+
+    def test_handle_user_message_src_directory_structure(self, agent: SelvageEvaluationAgent, sample_project_structure):
+        """src 디렉토리 구조 조회 테스트"""
+        # Given: 샘플 프로젝트 구조
+        agent.work_dir = str(sample_project_structure)
+        
+        # When: src 디렉토리 구조 질문
+        query = "src 디렉토리 구조를 설명해주세요"
+        response = agent.handle_user_message(query)
+        
+        # Then: 응답 기본 검증
+        assert isinstance(response, str)
+        assert len(response) > 0
+        
+        # src 디렉토리 관련 내용이 응답에 포함되었는지 확인
+        src_keywords = [
+            "src",              # 디렉토리 이름
+            "main.py",          # src 내부 파일
+            "main",             # main() 함수 관련
+            "소스 코드",         # 구조 설명
+            "파이썬",           # 파일 타입 설명
+            "함수"              # main() 함수 설명
+        ]
+        
+        response_lower = response.lower()
+        found_keywords = [keyword for keyword in src_keywords if keyword.lower() in response_lower]
+        
+        # 최소 3개 이상의 src 관련 키워드가 포함되어야 함
+        assert len(found_keywords) >= 3, f"src 디렉토리 관련 키워드가 부족함. 발견된 키워드: {found_keywords}, 전체 응답: {response}"
+        
+        # 디렉토리 구조 설명 관련 키워드 확인
+        structure_keywords = ["구조", "디렉토리", "파일", "포함", "있습니다"]
+        found_structure_keywords = [keyword for keyword in structure_keywords if keyword.lower() in response_lower]
+        assert len(found_structure_keywords) >= 2, f"구조 설명 키워드가 부족함. 발견된 키워드: {found_structure_keywords}"
+        
+        # src 디렉토리 언급 필수
+        assert "src" in response_lower, f"src 디렉토리가 응답에 언급되지 않음: {response}"
+        
+        # main.py 파일 언급 확인 (선택적, src 내부를 탐색했다면 포함될 수 있음)
+        has_main_py = "main.py" in response_lower
+        
+        # 대화 히스토리 확인
+        assert len(agent.session_state.conversation_history) == 1
+        history_entry = agent.session_state.conversation_history[0]
+        assert history_entry["user_message"] == query
+        assert history_entry["assistant_response"] == response
+        
+        print(f"\n[src 디렉토리 구조 테스트] 질문: {query}")
+        print(f"응답 (길이: {len(response)}자): {response[:300]}...")
+        print(f"발견된 src 키워드들: {found_keywords}")
+        print(f"발견된 구조 키워드들: {found_structure_keywords}")
+        print(f"main.py 언급 여부: {has_main_py}")
+        print("=" * 80)
 
     def test_handle_user_message_safety_validation(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """안전성 검증 테스트"""
