@@ -139,8 +139,7 @@ def test_main():
     def test_handle_user_message_basic_single_query(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """기본 단일 쿼리 처리 테스트"""
         # Given: 프로젝트 분석 요청
-        project_path = str(sample_project_structure)
-        user_query = f"{project_path} 디렉토리의 프로젝트 구조를 분석해주세요"
+        user_query = f"현재 워킹디렉토리 프로젝트 구조를 분석해주세요"
         
         # 초기 상태 확인
         assert not agent.is_interactive_mode
@@ -423,12 +422,12 @@ def test_main():
     def test_handle_user_message_exception_handling(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """예외 상황 처리 테스트"""
         # Given: 에이전트의 내부 메서드를 일시적으로 모킹하여 예외 발생
-        original_plan_execution = agent.plan_execution
+        original_plan_execution = agent.plan_execution_loop
         
-        def mock_plan_execution_with_error(user_query):
+        def mock_plan_execution_with_error(user_query, max_iterations=25):
             raise ValueError("테스트용 예외 발생")
         
-        agent.plan_execution = mock_plan_execution_with_error
+        agent.plan_execution_loop = mock_plan_execution_with_error
         
         try:
             # When: 예외가 발생하는 상황에서 메시지 처리
@@ -456,7 +455,7 @@ def test_main():
             
         finally:
             # 원래 메서드 복원
-            agent.plan_execution = original_plan_execution
+            agent.plan_execution_loop = original_plan_execution
 
     def test_handle_user_message_multiple_sessions(self, agent: SelvageEvaluationAgent, sample_project_structure):
         """다중 세션 대화 테스트"""

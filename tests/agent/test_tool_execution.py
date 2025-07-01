@@ -204,44 +204,6 @@ class TestToolExecutionIntegration:
         assert write_result.success
         print(f"JSON write result: {write_result.data}")
 
-    def test_plan_execution_to_tool_execution_flow(self, agent: SelvageEvaluationAgent, setup_test_environment):
-        """plan_execution → 도구 실행 전체 흐름 테스트"""
-        # Given: 실제 사용자 요청 시나리오
-        temp_dir = setup_test_environment
-        user_query = f"{temp_dir} 디렉토리의 구조를 분석하고 README.md 파일의 내용을 보여주세요"
-        
-        # When: 계획 수립
-        plan = agent.plan_execution(user_query)
-        assert isinstance(plan, ExecutionPlan)
-        
-        print(f"Generated plan: {plan.intent_summary}")
-        print(f"Tool calls: {[(tc.tool, tc.params) for tc in plan.tool_calls]}")
-        
-        # 계획에 따라 도구들 실행
-        tool_results = []
-        for tool_call in plan.tool_calls:
-            print(f"Executing tool: {tool_call.tool} with params: {tool_call.params}")
-            
-            result = agent.execute_tool(tool_call.tool, tool_call.params)
-            tool_results.append({
-                "tool": tool_call.tool,
-                "result": result,
-                "rationale": tool_call.rationale
-            })
-            
-            print(f"Tool result: success={result.success}, error={result.error_message}")
-            if result.success and result.data:
-                print(f"Data preview: {str(result.data)[:100]}...")
-        
-        # Then: 모든 도구 실행이 성공하거나 적절한 오류 메시지가 있는지 검증
-        assert len(tool_results) > 0
-        
-        for tool_result in tool_results:
-            result = tool_result["result"]
-            assert isinstance(result, ToolResult)
-            # 성공하거나 명확한 오류 메시지가 있어야 함
-            assert result.success or result.error_message is not None
-
     def test_error_handling_in_tool_execution(self, agent: SelvageEvaluationAgent, temp_dir):
         """도구 실행 중 오류 처리 테스트"""
         # Given: 잘못된 파라미터나 존재하지 않는 파일
