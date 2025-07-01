@@ -47,6 +47,7 @@ class SelvageEvaluationAgent:
         self.session_state = SessionState()  # 즉시 초기화
         self.current_phase: Optional[str] = None
         self.is_interactive_mode = False
+        self.tool_executor = ToolExecutor()
         
         # LLM 클라이언트 초기화
         api_key = os.getenv("GEMINI_API_KEY")
@@ -715,7 +716,7 @@ class SelvageEvaluationAgent:
             Tool execution result
         """
         try:
-            result = ToolExecutor().execute_tool_call(tool_name, params)
+            result = self.tool_executor.execute_tool_call(tool_name, params)
             
             logger.debug(f"Executed tool {tool_name} in {result.execution_time:.2f}s")
 
