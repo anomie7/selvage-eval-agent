@@ -5,7 +5,6 @@
 """
 
 import json
-import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -43,6 +42,9 @@ class SessionState:
         self.context_window_size: int = 8000  # 토큰 기준
         self.max_history_entries: int = 50    # 최대 대화 수
         
+        # 이벤트 기반 영속화를 위한 설정
+        self.auto_persist_dir: Optional[str] = None
+        
         logger.info(f"Initialized session state: {self.session_id}")
     
     def _generate_session_id(self) -> str:
@@ -79,6 +81,9 @@ class SessionState:
         
         self.phase_states[phase].update(state_updates)
         logger.debug(f"Updated phase state: {phase} with {len(state_updates)} items")
+        
+        # 이벤트 기반 자동 영속화
+        self._auto_persist_if_enabled()
     
     def get_phase_state(self, phase: str) -> Dict[str, Any]:
         """특정 Phase의 상태 조회
@@ -99,6 +104,9 @@ class SessionState:
         """
         self.global_state.update(state_updates)
         logger.debug(f"Updated global state with {len(state_updates)} items")
+        
+        # 이벤트 기반 자동 영속화
+        self._auto_persist_if_enabled()
     
     def get_completed_phases(self) -> List[str]:
         """완료된 Phase 목록 반환
@@ -198,34 +206,24 @@ class SessionState:
             logger.error(f"Failed to load session state: {e}")
             raise
     
-    def auto_persist(self, output_dir: str, interval: int = 300) -> None:
-        """자동 영속화 시작 (5분마다)
+    def set_auto_persist_dir(self, output_dir: str) -> None:
+        """이벤트 기반 자동 영속화를 위한 출력 디렉토리 설정
         
         Args:
-            output_dir: 출력 디렉토리
-            interval: 영속화 간격 (초)
+            output_dir: 출력 디렉토리 경로
         """
-        state_file = os.path.join(output_dir, "session_state.json")
-        
-        async def persist_loop():
-            while True:
-                try:
-                    await asyncio.sleep(interval)
-                    self.persist_to_disk(state_file)
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    logger.error(f"Auto-persist failed: {e}")
-        
-        # 백그라운드에서 자동 영속화 태스크 시작
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        self._auto_persist_task = loop.create_task(persist_loop())
-        logger.info(f"Started auto-persist (interval: {interval}s)")
+        self.auto_persist_dir = output_dir
+        logger.info(f"Set auto-persist directory: {output_dir}")
+    
+    def _auto_persist_if_enabled(self) -> None:
+        """자동 영속화가 활성화된 경우 디스크에 저장"""
+        if self.auto_persist_dir:
+            state_file = os.path.join(self.auto_persist_dir, "session_state.json")
+            try:
+                self.persist_to_disk(state_file)
+                logger.debug(f"Auto-persisted session state to: {state_file}")
+            except Exception as e:
+                logger.error(f"Auto-persist failed: {e}")
     
     def add_conversation_turn(self, user_message: str, assistant_response: str, 
                             tool_results: Optional[List["ToolExecutionResult"]] = None) -> None:
@@ -261,6 +259,9 @@ class SessionState:
             logger.info(f"Trimmed conversation history to {self.max_history_entries} entries")
         
         logger.debug(f"Added conversation turn {turn['turn_id']}")
+        
+        # 이벤트 기반 자동 영속화
+        self._auto_persist_if_enabled()
     
     def get_conversation_context(self) -> List[Dict[str, Any]]:
         """현재 컨텍스트 반환 (토큰 제한 고려)
@@ -305,6 +306,9 @@ class SessionState:
         conversation_count = len(self.conversation_history)
         self.conversation_history.clear()
         logger.info(f"Cleared conversation history ({conversation_count} turns removed)")
+        
+        # 이벤트 기반 자동 영속화
+        self._auto_persist_if_enabled()
     
     def get_context_stats(self) -> Dict[str, Any]:
         """컨텍스트 사용량 통계

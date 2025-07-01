@@ -67,8 +67,9 @@ class SelvageEvaluationAgent:
         # 초기 세션 메타데이터 저장
         self._save_session_metadata()
         
-        # 자동 영속화 시작
-        self.session_state.auto_persist(self.config.evaluation.output_dir)
+        # 이벤트 기반 자동 영속화 설정 및 초기 저장
+        self.session_state.set_auto_persist_dir(self.config.evaluation.output_dir)
+        self.session_state.persist_to_disk(os.path.join(self.config.evaluation.output_dir, "session_state.json"))
         
         logger.info(f"Initialized SelvageEvaluationAgent with model: {config.agent_model} (session: {self.session_state.session_id}, work_dir: {self.work_dir})")
     
@@ -85,9 +86,10 @@ class SelvageEvaluationAgent:
         old_session_id = self.session_state.session_id
         self.session_state = SessionState(session_id)
         
-        # 새 세션 메타데이터 저장 및 자동 영속화 재시작
+        # 새 세션 메타데이터 저장 및 이벤트 기반 자동 영속화 설정
         self._save_session_metadata()
-        self.session_state.auto_persist(self.config.evaluation.output_dir)
+        self.session_state.set_auto_persist_dir(self.config.evaluation.output_dir)
+        self.session_state.persist_to_disk(os.path.join(self.config.evaluation.output_dir, "session_state.json"))
         
         logger.info(f"Reset from session {old_session_id} to new session: {self.session_state.session_id}")
         return self.session_state.session_id
