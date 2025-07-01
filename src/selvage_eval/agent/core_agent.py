@@ -24,7 +24,7 @@ from selvage_eval.tools.list_directory_tool import ListDirectoryTool
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
 from ..llm.gemini_client import GeminiClient
-from .react_types import ToolCallModel, WorkingContext, IterationEntry, ReActDecision
+from .react_types import ToolCallModel, WorkingContext, IterationEntry, ReActDecision, ToolExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -351,14 +351,14 @@ class SelvageEvaluationAgent:
                 user_feedback_request=f"분석 중 오류가 발생했습니다: {str(e)}. 다시 시도하거나 더 간단한 요청을 해주세요."
             )
 
-    def _execute_planned_tools(self, tool_calls: List[ToolCallModel]) -> List[Dict[str, Any]]:
+    def _execute_planned_tools(self, tool_calls: List[ToolCallModel]) -> List[ToolExecutionResult]:
         """계획된 도구들을 실행합니다
         
         Args:
             tool_calls: 실행할 도구 호출 목록
             
         Returns:
-            도구 실행 결과 목록
+            도구 실행 결과 목록 (ToolExecutionResult 객체들)
         """
         results = []
         
@@ -376,12 +376,12 @@ class SelvageEvaluationAgent:
                 result = self.execute_tool(tool_name, params)
                 
                 # 결과 포맷팅
-                tool_result = {
-                    "tool": tool_name,
-                    "params": params,
-                    "rationale": rationale,
-                    "result": result
-                }
+                tool_result = ToolExecutionResult(
+                    tool=tool_name,
+                    params=params,
+                    rationale=rationale,
+                    result=result
+                )
                 
                 results.append(tool_result)
                 
@@ -397,12 +397,12 @@ class SelvageEvaluationAgent:
                     error_message=str(e)
                 )
                 
-                tool_result = {
-                    "tool": tool_call.tool,
-                    "params": tool_call.params,
-                    "rationale": tool_call.rationale,
-                    "result": error_result
-                }
+                tool_result = ToolExecutionResult(
+                    tool=tool_call.tool,
+                    params=tool_call.params,
+                    rationale=tool_call.rationale,
+                    result=error_result
+                )
                 
                 results.append(tool_result)
         
@@ -582,8 +582,8 @@ class SelvageEvaluationAgent:
                 
                 # 도구 실행 결과 상세
                 for obs in observations:
-                    tool_name = obs.get('tool', 'Unknown')
-                    result = obs.get('result', {})
+                    tool_name = obs.tool
+                    result = obs.result
                     if hasattr(result, 'success'):
                         status = "성공" if result.success else "실패"
                         prompt_parts.append(f"    {tool_name}: {status}")

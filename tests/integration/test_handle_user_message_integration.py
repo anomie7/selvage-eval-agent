@@ -191,11 +191,15 @@ def test_main():
                 print(f"      목적: {rationale}")
                 
                 if result_obj:
-                    print(f"      성공: {getattr(result_obj, 'success', 'Unknown')}")
-                    print(f"      실행시간: {getattr(result_obj, 'execution_time', 'Unknown')}초")
+                    # result_obj는 이제 딕셔너리입니다 (ToolExecutionResult.to_dict()로 변환됨)
+                    success = result_obj.get('success', 'Unknown') if isinstance(result_obj, dict) else getattr(result_obj, 'success', 'Unknown')
+                    execution_time = result_obj.get('execution_time', 'Unknown') if isinstance(result_obj, dict) else getattr(result_obj, 'execution_time', 'Unknown')
+                    
+                    print(f"      성공: {success}")
+                    print(f"      실행시간: {execution_time}초")
                     
                     # 결과 데이터 완전 출력
-                    result_data = getattr(result_obj, 'data', None)
+                    result_data = result_obj.get('data', None) if isinstance(result_obj, dict) else getattr(result_obj, 'data', None)
                     if result_data:
                         print(f"      결과 데이터:")
                         if isinstance(result_data, str):

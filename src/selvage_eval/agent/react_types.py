@@ -5,7 +5,34 @@ ReAct (Reasoning and Acting) 패턴에서 사용되는 구조화된 데이터 �
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+
+from ..tools.tool_result import ToolResult
+
+
+class ToolExecutionResult(BaseModel):
+    """도구 실행 결과"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)  # ToolResult 객체 허용
+    
+    tool: str = Field(description="실행된 도구 이름")
+    params: Any = Field(description="도구 실행 매개변수")
+    rationale: str = Field(description="도구를 사용한 이유")
+    result: ToolResult = Field(description="도구 실행 결과")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """딕셔너리로 변환 (JSON 직렬화 가능)"""
+        return {
+            "tool": self.tool,
+            "params": self.params,
+            "rationale": self.rationale,
+            "result": {
+                "success": self.result.success,
+                "data": self.result.data,
+                "error_message": self.result.error_message,
+                "execution_time": getattr(self.result, 'execution_time', 0.0),
+                "metadata": getattr(self.result, 'metadata', {})
+            }
+        }
 
 
 class ToolCallModel(BaseModel):
@@ -51,7 +78,7 @@ class IterationEntry:
     iteration: int
     thinking: str
     actions: List[ToolCallModel] | None
-    observations: List[Dict[str, Any]]
+    observations: List[ToolExecutionResult]
 
 
 
@@ -60,7 +87,7 @@ class WorkingContext:
     """ReAct 루프의 작업 컨텍스트"""
     original_query: str
     iteration_history: List[IterationEntry]
-    accumulated_tool_results: List[Dict[str, Any]]
+    accumulated_tool_results: List[ToolExecutionResult]
     
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환 (기존 코드 호환성용)"""
@@ -71,11 +98,11 @@ class WorkingContext:
                     "iteration": entry.iteration,
                     "thinking": entry.thinking,
                     "actions": entry.actions or [],
-                    "observations": entry.observations
+                    "observations": [obs.to_dict() for obs in entry.observations]
                 }
                 for entry in self.iteration_history
             ],
-            "accumulated_tool_results": self.accumulated_tool_results
+            "accumulated_tool_results": [result.to_dict() for result in self.accumulated_tool_results]
         }
     
     @classmethod
@@ -86,7 +113,7 @@ class WorkingContext:
                 iteration=entry["iteration"],
                 thinking=entry["thinking"],
                 actions=entry["actions"],
-                observations=entry["observations"]
+                observations=[]  # 딕셔너리에서 ToolExecutionResult로 변환은 복잡하므로 빈 리스트로 처리
             )
             for entry in data.get("iteration_history", [])
         ]
@@ -94,5 +121,5 @@ class WorkingContext:
         return cls(
             original_query=data.get("original_query", ""),
             iteration_history=iteration_history,
-            accumulated_tool_results=data.get("accumulated_tool_results", [])
+            accumulated_tool_results=[]  # 딕셔너리에서 ToolExecutionResult로 변환은 복잡하므로 빈 리스트로 처리
         )

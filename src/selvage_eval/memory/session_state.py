@@ -7,7 +7,10 @@
 import json
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..agent.react_types import ToolExecutionResult
 import uuid
 import os
 import logging
@@ -225,19 +228,28 @@ class SessionState:
         logger.info(f"Started auto-persist (interval: {interval}s)")
     
     def add_conversation_turn(self, user_message: str, assistant_response: str, 
-                            tool_results: Optional[List[Dict[str, Any]]] = None) -> None:
+                            tool_results: Optional[List["ToolExecutionResult"]] = None) -> None:
         """대화 턴 추가
         
         Args:
             user_message: 사용자 메시지
             assistant_response: 어시스턴트 응답
-            tool_results: 도구 실행 결과 (선택사항)
+            tool_results: 도구 실행 결과 (ToolExecutionResult 객체들, 선택사항)
         """
+        # ToolExecutionResult 객체들을 딕셔너리로 변환
+        tool_results_dict = []
+        if tool_results:
+            for result in tool_results:
+                if hasattr(result, 'to_dict'):  # ToolExecutionResult 객체인 경우
+                    tool_results_dict.append(result.to_dict())
+                else:  # 이미 딕셔너리인 경우 (기존 호환성)
+                    tool_results_dict.append(result)
+
         turn = {
             "timestamp": datetime.now().isoformat(),
             "user_message": user_message,
             "assistant_response": assistant_response,
-            "tool_results": tool_results or [],
+            "tool_results": tool_results_dict,
             "turn_id": len(self.conversation_history) + 1
         }
         
