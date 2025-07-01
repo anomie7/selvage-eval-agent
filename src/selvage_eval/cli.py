@@ -99,6 +99,7 @@ def main() -> None:
     parser.add_argument(
         "--config", "-c",
         type=str,
+        default=get_default_config_path(),
         help="설정 파일 경로 (기본값: configs/selvage-eval-config.yml)"
     )
     
@@ -106,18 +107,6 @@ def main() -> None:
         "--auto", "-a",
         action="store_true",
         help="자동 실행 모드 (대화형 모드 대신 전체 평가 자동 실행)"
-    )
-    
-    parser.add_argument(
-        "--repos", "-r",
-        type=str,
-        help="실행할 저장소 이름들 (쉼표로 구분, 예: cline,selvage)"
-    )
-    
-    parser.add_argument(
-        "--models", "-m",
-        type=str,
-        help="사용할 모델들 (쉼표로 구분, 예: gemini-2.5-pro,claude-sonnet-4)"
     )
     
     parser.add_argument(
@@ -142,35 +131,8 @@ def main() -> None:
     try:
         # 설정 파일 로드
         config_path = args.config
-        if not config_path:
-            try:
-                config_path = get_default_config_path()
-            except FileNotFoundError:
-                print("[ERROR] 기본 설정 파일을 찾을 수 없습니다.")
-                print("--config 옵션으로 설정 파일을 지정하거나")
-                print("configs/selvage-eval-config.yml 파일을 생성하세요.")
-                sys.exit(1)
-        
         config = load_config(config_path)
         print(f"[CONFIG] 설정을 로드했습니다: {config_path}")
-        
-        # 저장소 필터링
-        if args.repos:
-            repo_names = [name.strip() for name in args.repos.split(",")]
-            config.target_repositories = [
-                repo for repo in config.target_repositories 
-                if repo.name in repo_names
-            ]
-            print(f"[TARGET] 선택된 저장소: {repo_names}")
-        
-        # 모델 필터링
-        if args.models:
-            model_names = [name.strip() for name in args.models.split(",")]
-            config.review_models = [
-                model for model in config.review_models 
-                if model in model_names
-            ]
-            print(f"[MODEL] 선택된 모델: {model_names}")
         
         # 강제 재실행 설정
         if args.force_refresh:

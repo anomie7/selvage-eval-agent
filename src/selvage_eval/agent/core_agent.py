@@ -655,57 +655,10 @@ class SelvageEvaluationAgent:
             logger.error(f"Response text: {response_text}")
             
             # 파싱 실패 시 기존 방식으로 fallback
-            return self._parse_react_decision_fallback(response_text)
-
-    def _parse_react_decision_fallback(self, response_text: str) -> Dict[str, Any]:
-        """Fallback: 기존 방식으로 ReAct 결정을 파싱합니다"""
-        
-        try:
-            # JSON 추출 및 파싱
-            decision = self._extract_json_from_response(response_text)
-            
-            # 필수 필드 검증
-            if "status" not in decision:
-                raise ValueError("status 필드가 없습니다")
-            
-            if "thinking" not in decision:
-                decision["thinking"] = "분석 과정이 제공되지 않았습니다"
-            
-            # 상태별 필수 필드 검증
-            status = decision["status"]
-            
-            if status == "TASK_COMPLETE":
-                if "final_response" not in decision:
-                    raise ValueError("TASK_COMPLETE 상태에는 final_response가 필요합니다")
-            
-            elif status == "NEED_MORE_WORK":
-                if "tool_calls" not in decision:
-                    raise ValueError("NEED_MORE_WORK 상태에는 tool_calls가 필요합니다")
-                if not isinstance(decision["tool_calls"], list):
-                    raise ValueError("tool_calls는 리스트여야 합니다")
-            
-            elif status == "NEED_USER_HELP":
-                if "user_feedback_request" not in decision:
-                    raise ValueError("NEED_USER_HELP 상태에는 user_feedback_request가 필요합니다")
-            
-            else:
-                raise ValueError(f"알 수 없는 status: {status}")
-            
-            return decision
-            
-        except Exception as e:
-            logger.error(f"Failed to parse ReAct decision: {e}")
-            logger.error(f"Response text: {response_text}")
-            
-            # 파싱 실패 시 안전한 기본값 반환
-            return {
-                "status": "NEED_USER_HELP",
-                "thinking": f"응답 파싱에 실패했습니다: {str(e)}",
-                "user_feedback_request": f"죄송합니다. 요청을 처리하는 중 내부 오류가 발생했습니다. 다시 시도해 주세요."
-            }
+            return self._parse_react_decision(response_text)
 
     def _parse_react_decision(self, response_text: str) -> Dict[str, Any]:
-        """LLM 응답에서 ReAct 결정을 파싱합니다"""
+        """Fallback: 기존 방식으로 ReAct 결정을 파싱합니다"""
         
         try:
             # JSON 추출 및 파싱
