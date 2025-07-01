@@ -4,7 +4,10 @@ Google Gemini API에 대한 단순한 래퍼 클라이언트입니다.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Type
+
+from pydantic import BaseModel
+
 
 from google.genai.types import GenerateContentConfig, FunctionDeclaration, Tool as GeminiTool
 
@@ -46,7 +49,8 @@ class GeminiClient:
         self, 
         messages: List[Dict[str, str]], 
         system_instruction: str,
-        tools: Optional[List[Tool]] = None    
+        tools: Optional[List[Tool]] = None,
+        response_schema: Optional[Type[BaseModel]] = None
     ) -> Any:
         """Gemini API에 쿼리를 보내고 응답을 받습니다
         
@@ -54,9 +58,10 @@ class GeminiClient:
             messages: 메시지 리스트 (role, content 포함)
             system_instruction: 시스템 인스트럭션
             tools: 사용할 도구 리스트 (Tool 객체들)
+            response_schema: 구조화된 출력을 위한 Pydantic BaseModel 클래스
             
         Returns:
-            Any: API 응답 (텍스트 또는 function call 포함 응답)
+            Any: API 응답 (텍스트, function call, 또는 구조화된 JSON 응답)
             
         Raises:
             RuntimeError: 클라이언트가 초기화되지 않았거나 응답이 비어있는 경우
@@ -91,6 +96,32 @@ class GeminiClient:
                 temperature=0.0
             )
             
+            # response_schema가 제공된 경우 구조화된 출력 설정
+            if response_schema:
+                if BaseModel and issubclass(response_schema, BaseModel):
+                    # Pydantic 모델에서 JSON 스키마 추출
+                    json_schema = response_schema.model_json_schema()
+                    
+                    # Gemini API는 additionalProperties를 지원하지 않으므로 제거
+                    def remove_additional_properties(schema_dict):
+                        if isinstance(schema_dict, dict):
+                            schema_dict.pop('additionalProperties', None)
+                            for value in schema_dict.values():
+                                if isinstance(value, dict):
+                                    remove_additional_properties(value)
+                                elif isinstance(value, list):
+                                    for item in value:
+                                        if isinstance(item, dict):
+                                            remove_additional_properties(item)
+                    
+                    remove_additional_properties(json_schema)
+                    
+                    config.response_mime_type = "application/json"
+                    config.response_schema = json_schema
+                    logger.debug("Configured structured output with Pydantic model schema")
+                else:
+                    raise ValueError("response_schema must be a Pydantic BaseModel subclass")
+            
             # tools가 제공된 경우 function calling 설정
             if tools:
                 function_declarations = self._build_function_declarations(tools)
@@ -107,6 +138,12 @@ class GeminiClient:
             if tools:
                 logger.debug("Received function calling response from Gemini")
                 return response
+            # response_schema가 제공된 경우 구조화된 응답 반환
+            elif response_schema:
+                if response.text is None:
+                    raise RuntimeError("Empty response from Gemini API")
+                logger.debug("Received structured JSON response from Gemini")
+                return response.text  # JSON 문자열 반환
             else:
                 # 기존 방식: 텍스트만 반환
                 if response.text is None:

@@ -24,6 +24,7 @@ from selvage_eval.tools.list_directory_tool import ListDirectoryTool
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
 from ..llm.gemini_client import GeminiClient
+from .react_types import ToolCallModel, WorkingContext, IterationEntry, ReActDecision
 
 logger = logging.getLogger(__name__)
 
@@ -241,45 +242,47 @@ class SelvageEvaluationAgent:
         Returns:
             최종 응답 문자열
         """
-        working_context = {
-            "original_query": user_query,
-            "iteration_history": [],
-            "accumulated_tool_results": []
-        }
+        working_context = WorkingContext(
+            original_query=user_query,
+            iteration_history=[],
+            accumulated_tool_results=[]
+        )
         
         for iteration in range(max_iterations):
             # Think: 현재 상황 분석 및 다음 행동 결정
             agent_decision = self._think_and_decide(working_context)
             
-            if agent_decision["status"] == "TASK_COMPLETE":
-                final_response = agent_decision["final_response"]
+            if agent_decision.status == "TASK_COMPLETE":
+                final_response = agent_decision.final_response or "작업이 완료되었습니다."
                 # 대화 히스토리에 추가
                 self.session_state.add_conversation_turn(
                     user_message=user_query,
                     assistant_response=final_response,
-                    tool_results=working_context["accumulated_tool_results"]
+                    tool_results=working_context.accumulated_tool_results
                 )
                 return final_response
                 
-            elif agent_decision["status"] == "NEED_MORE_WORK":
+            elif agent_decision.status == "NEED_MORE_WORK":
                 # Act: 도구 실행
-                tool_results = self._execute_planned_tools(agent_decision["tool_calls"])
+                if agent_decision.tool_calls:
+                    tool_results = self._execute_planned_tools(agent_decision.tool_calls)
                 
                 # Observe: 결과 반영
-                working_context["iteration_history"].append({
-                    "iteration": iteration + 1,
-                    "thinking": agent_decision["thinking"],
-                    "actions": agent_decision["tool_calls"],
-                    "observations": tool_results
-                })
-                working_context["accumulated_tool_results"].extend(tool_results)
+                iteration_entry = IterationEntry(
+                    iteration=iteration + 1,
+                    thinking=agent_decision.thinking,
+                    actions=agent_decision.tool_calls,
+                    observations=tool_results
+                )
+                working_context.iteration_history.append(iteration_entry)
+                working_context.accumulated_tool_results.extend(tool_results)
                 
-            elif agent_decision["status"] == "NEED_USER_HELP":
-                feedback_response = agent_decision["user_feedback_request"]
+            elif agent_decision.status == "NEED_USER_HELP":
+                feedback_response = agent_decision.user_feedback_request or "도움이 필요합니다."
                 self.session_state.add_conversation_turn(
                     user_message=user_query,
                     assistant_response=feedback_response,
-                    tool_results=working_context["accumulated_tool_results"]
+                    tool_results=working_context.accumulated_tool_results
                 )
                 return feedback_response
         
@@ -288,18 +291,18 @@ class SelvageEvaluationAgent:
         self.session_state.add_conversation_turn(
             user_message=user_query,
             assistant_response=max_iterations_response,
-            tool_results=working_context["accumulated_tool_results"]
+            tool_results=working_context.accumulated_tool_results
         )
         return max_iterations_response
 
-    def _think_and_decide(self, working_context: Dict[str, Any]) -> Dict[str, Any]:
+    def _think_and_decide(self, working_context: WorkingContext) -> ReActDecision:
         """현재 상황을 분석하고 다음 행동을 결정합니다
         
         Args:
             working_context: 작업 컨텍스트
             
         Returns:
-            결정 사항 딕셔너리
+            ReAct 결정 데이터 클래스
         """
         # 현재 상태 정보 수집
         current_state = self._analyze_current_state()
@@ -312,32 +315,43 @@ class SelvageEvaluationAgent:
         
         messages = [{"role": "user", "content": react_prompt}]
         
-        # LLM 호출 (텍스트 기반 JSON 응답 요청)
+        # LLM 호출 (Structured output으로 JSON 응답 요청)
         try:
             system_instruction = self._build_react_system_prompt()
             response = self.gemini_client.query(
                 messages=messages,
                 system_instruction=system_instruction,
-                # Function calling 없이 텍스트 응답으로 JSON 받기
-                tools=None
+                tools=None,
+                response_schema=ReActDecision
             )
             
-            # JSON 응답 파싱 (응답이 문자열인지 객체인지 확인)
-            response_text = response.text if hasattr(response, 'text') else str(response)
-            decision = self._parse_react_decision(response_text)
+            # Pydantic model_validate_json으로 직접 파싱
+            response_text = response if isinstance(response, str) else str(response)
+            decision = ReActDecision.model_validate_json(response_text)
             
-            logger.debug(f"ReAct decision for iteration: {decision['status']}")
+            logger.debug(f"ReAct decision for iteration: {decision.status}")
             return decision
             
         except Exception as e:
             logger.error(f"Error in _think_and_decide: {e}")
-            return {
-                "status": "NEED_USER_HELP",
-                "thinking": f"오류가 발생했습니다: {str(e)}",
-                "user_feedback_request": f"분석 중 오류가 발생했습니다: {str(e)}. 다시 시도하거나 더 간단한 요청을 해주세요."
-            }
+            # Pydantic 파싱 실패 시 fallback으로 기존 방식 시도
+            try:
+                if 'response_text' in locals():
+                    decision_dict = self._parse_structured_decision(response_text)
+                    return ReActDecision.from_dict(decision_dict)
+            except Exception:
+                pass
+            
+            # 모든 파싱 실패 시 안전한 기본값 반환
+            return ReActDecision(
+                thinking=f"오류가 발생했습니다: {str(e)}",
+                status="NEED_USER_HELP",
+                final_response=None,
+                tool_calls=None,
+                user_feedback_request=f"분석 중 오류가 발생했습니다: {str(e)}. 다시 시도하거나 더 간단한 요청을 해주세요."
+            )
 
-    def _execute_planned_tools(self, tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _execute_planned_tools(self, tool_calls: List[ToolCallModel]) -> List[Dict[str, Any]]:
         """계획된 도구들을 실행합니다
         
         Args:
@@ -350,9 +364,9 @@ class SelvageEvaluationAgent:
         
         for tool_call in tool_calls:
             try:
-                tool_name = tool_call.get("tool", "")
-                params = tool_call.get("params", {})
-                rationale = tool_call.get("rationale", "")
+                tool_name = tool_call.tool
+                params = tool_call.params
+                rationale = tool_call.rationale
                 
                 if not tool_name:
                     logger.warning("도구 이름이 없는 tool_call이 있습니다")
@@ -384,9 +398,9 @@ class SelvageEvaluationAgent:
                 )
                 
                 tool_result = {
-                    "tool": tool_call.get("tool", "unknown"),
-                    "params": tool_call.get("params", {}),
-                    "rationale": tool_call.get("rationale", ""),
+                    "tool": tool_call.tool,
+                    "params": tool_call.params,
+                    "rationale": tool_call.rationale,
                     "result": error_result
                 }
                 
@@ -394,7 +408,7 @@ class SelvageEvaluationAgent:
         
         return results
 
-    def _handle_max_iterations_exceeded(self, working_context: Dict[str, Any]) -> str:
+    def _handle_max_iterations_exceeded(self, working_context: WorkingContext) -> str:
         """최대 반복 횟수 도달 시 처리합니다
         
         Args:
@@ -403,8 +417,8 @@ class SelvageEvaluationAgent:
         Returns:
             최대 반복 도달 응답
         """
-        original_query = working_context.get("original_query", "알 수 없는 요청")
-        iteration_count = len(working_context.get("iteration_history", []))
+        original_query = working_context.original_query or "알 수 없는 요청"
+        iteration_count = len(working_context.iteration_history)
         
         return f"죄송합니다. '{original_query}' 요청을 처리하는 데 최대 반복 횟수({iteration_count})에 도달했습니다. " \
                f"작업이 복잡하거나 추가 정보가 필요할 수 있습니다. 더 구체적으로 요청해 주시거나 단계별로 나누어 요청해 주세요."
@@ -526,7 +540,7 @@ class SelvageEvaluationAgent:
 
     def _build_react_prompt(
         self, 
-        working_context: Dict[str, Any], 
+        working_context: WorkingContext, 
         current_state: Dict[str, Any], 
         conversation_context: List[Dict[str, Any]]
     ) -> str:
@@ -535,7 +549,7 @@ class SelvageEvaluationAgent:
         prompt_parts = []
         
         # 사용자 원본 질문
-        prompt_parts.append(f"# 사용자 질문\n{working_context['original_query']}")
+        prompt_parts.append(f"# 사용자 질문\n{working_context.original_query}")
         
         # 현재 상태 정보
         try:
@@ -547,24 +561,23 @@ class SelvageEvaluationAgent:
         # 이전 대화 컨텍스트
         if conversation_context:
             prompt_parts.append("\n# 이전 대화 맥락")
-            for i, context in enumerate(conversation_context, 1):  # 최근 3개만
+            for i, context in enumerate(conversation_context[-3:], 1):  # 최근 3개만
                 prompt_parts.append(f"대화 {i}:")
                 prompt_parts.append(f"  사용자: {context.get('user_message', '').strip()}")
                 prompt_parts.append(f"  어시스턴트: {context.get('assistant_response', '').strip()}")
         
         # 현재 반복의 히스토리
-        iteration_history = working_context.get('iteration_history', [])
-        if iteration_history:
+        if working_context.iteration_history:
             prompt_parts.append("\n# 이번 요청의 진행 과정")
-            for entry in iteration_history[-5:]:  # 최근 5개 반복만
-                iteration = entry.get('iteration', 0)
-                thinking = entry.get('thinking', '')
-                actions = entry.get('actions', [])
-                observations = entry.get('observations', [])
+            for entry in working_context.iteration_history[-5:]:  # 최근 5개 반복만
+                iteration = entry.iteration
+                thinking = entry.thinking
+                actions = entry.actions
+                observations = entry.observations
                 
                 prompt_parts.append(f"반복 {iteration}:")
                 prompt_parts.append(f"  생각: {thinking}")
-                prompt_parts.append(f"  실행한 도구: {len(actions)}개")
+                prompt_parts.append(f"  실행한 도구: {len(actions or [])}개")
                 prompt_parts.append(f"  관찰 결과: {len(observations)}개")
                 
                 # 도구 실행 결과 상세
@@ -600,6 +613,96 @@ class SelvageEvaluationAgent:
         prompt_parts.append("\n# 지시사항\n위 정보를 바탕으로 현재 상황을 분석하고 다음 행동을 JSON 형태로 결정해주세요.")
         
         return "\n".join(prompt_parts)
+
+    def _parse_structured_decision(self, response_text: str) -> Dict[str, Any]:
+        """Structured output에서 ReAct 결정을 파싱합니다"""
+        
+        try:
+            # Structured output은 이미 유효한 JSON이어야 함
+            decision = json.loads(response_text)
+            
+            # 필수 필드 검증
+            if "status" not in decision:
+                raise ValueError("status 필드가 없습니다")
+            
+            if "thinking" not in decision:
+                decision["thinking"] = "분석 과정이 제공되지 않았습니다"
+            
+            # 상태별 필수 필드 검증
+            status = decision["status"]
+            
+            if status == "TASK_COMPLETE":
+                if "final_response" not in decision:
+                    raise ValueError("TASK_COMPLETE 상태에는 final_response가 필요합니다")
+            
+            elif status == "NEED_MORE_WORK":
+                if "tool_calls" not in decision:
+                    raise ValueError("NEED_MORE_WORK 상태에는 tool_calls가 필요합니다")
+                if not isinstance(decision["tool_calls"], list):
+                    raise ValueError("tool_calls는 리스트여야 합니다")
+            
+            elif status == "NEED_USER_HELP":
+                if "user_feedback_request" not in decision:
+                    raise ValueError("NEED_USER_HELP 상태에는 user_feedback_request가 필요합니다")
+            
+            else:
+                raise ValueError(f"알 수 없는 status: {status}")
+            
+            return decision
+            
+        except Exception as e:
+            logger.error(f"Failed to parse structured decision: {e}")
+            logger.error(f"Response text: {response_text}")
+            
+            # 파싱 실패 시 기존 방식으로 fallback
+            return self._parse_react_decision_fallback(response_text)
+
+    def _parse_react_decision_fallback(self, response_text: str) -> Dict[str, Any]:
+        """Fallback: 기존 방식으로 ReAct 결정을 파싱합니다"""
+        
+        try:
+            # JSON 추출 및 파싱
+            decision = self._extract_json_from_response(response_text)
+            
+            # 필수 필드 검증
+            if "status" not in decision:
+                raise ValueError("status 필드가 없습니다")
+            
+            if "thinking" not in decision:
+                decision["thinking"] = "분석 과정이 제공되지 않았습니다"
+            
+            # 상태별 필수 필드 검증
+            status = decision["status"]
+            
+            if status == "TASK_COMPLETE":
+                if "final_response" not in decision:
+                    raise ValueError("TASK_COMPLETE 상태에는 final_response가 필요합니다")
+            
+            elif status == "NEED_MORE_WORK":
+                if "tool_calls" not in decision:
+                    raise ValueError("NEED_MORE_WORK 상태에는 tool_calls가 필요합니다")
+                if not isinstance(decision["tool_calls"], list):
+                    raise ValueError("tool_calls는 리스트여야 합니다")
+            
+            elif status == "NEED_USER_HELP":
+                if "user_feedback_request" not in decision:
+                    raise ValueError("NEED_USER_HELP 상태에는 user_feedback_request가 필요합니다")
+            
+            else:
+                raise ValueError(f"알 수 없는 status: {status}")
+            
+            return decision
+            
+        except Exception as e:
+            logger.error(f"Failed to parse ReAct decision: {e}")
+            logger.error(f"Response text: {response_text}")
+            
+            # 파싱 실패 시 안전한 기본값 반환
+            return {
+                "status": "NEED_USER_HELP",
+                "thinking": f"응답 파싱에 실패했습니다: {str(e)}",
+                "user_feedback_request": f"죄송합니다. 요청을 처리하는 중 내부 오류가 발생했습니다. 다시 시도해 주세요."
+            }
 
     def _parse_react_decision(self, response_text: str) -> Dict[str, Any]:
         """LLM 응답에서 ReAct 결정을 파싱합니다"""
