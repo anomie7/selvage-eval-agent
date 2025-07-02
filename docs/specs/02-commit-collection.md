@@ -190,13 +190,14 @@ class CommitCollector:
                 "lines_added": 45,
                 "lines_deleted": 12
             },
-            "total_score": 85,
-            "score_details": {
+            "score": {
+                "total_score": 85,
                 "file_type_penalty": -2,
-                "line_count_penalty": -5,
-                "keyword_penalty": -3,
-                "path_penalty": 10,
-                "time_penalty": 10,
+                "line_count_score": 15,
+                "keyword_score": 10,
+                "path_pattern_score": 10,
+                "time_weight_score": 10,
+                "additional_adjustments": 0,
             }
         ],
         "metadata": {
