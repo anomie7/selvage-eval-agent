@@ -962,15 +962,6 @@ class SelvageExecutorTool(Tool):
 
 ## 구현 체크리스트
 
-### Phase 1: 기본 인프라
-- [ ] YAML 설정 파일 파서 구현
-- [ ] CLI 인터페이스 및 플래그 처리
-- [ ] Git 작업 모듈 구현
-- [ ] Selvage 실행 래퍼 구현
-- [ ] JSON 데이터 스키마 정의
-- [ ] 기본 에러 처리 구현
-- [ ] 자동 session ID 생성 로직
-
 ### Phase 2: 코어 워크플로우
 - [ ] agent-model과 review-models 분리 처리
 - [ ] 다중 저장소 순회 로직

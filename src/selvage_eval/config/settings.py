@@ -17,13 +17,6 @@ logger = logging.getLogger(__name__)
 class FilterOverrides(BaseModel):
     """저장소별 필터 오버라이드 설정"""
     min_changed_lines: Optional[int] = None
-    file_types: Optional[List[str]] = None
-
-
-class SecurityConstraints(BaseModel):
-    """보안 제약사항"""
-    no_write_operations: bool = False
-    review_target_only: bool = False
 
 
 class TargetRepository(BaseModel):
@@ -32,8 +25,7 @@ class TargetRepository(BaseModel):
     path: str
     tech_stack: str
     description: str
-    access_mode: str = "readwrite"
-    security_constraints: Optional[List[str]] = None
+    access_mode: str = "readonly"
     filter_overrides: Optional[FilterOverrides] = None
     
     @field_validator('path')
