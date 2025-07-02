@@ -218,7 +218,7 @@ class SessionState:
     def _auto_persist_if_enabled(self) -> None:
         """자동 영속화가 활성화된 경우 디스크에 저장"""
         if self.auto_persist_dir:
-            state_file = os.path.join(self.auto_persist_dir, "session_state.json")
+            state_file = os.path.join(self.auto_persist_dir, f"session_state_{self.session_id}.json")
             try:
                 self.persist_to_disk(state_file)
                 logger.debug(f"Auto-persisted session state to: {state_file}")
