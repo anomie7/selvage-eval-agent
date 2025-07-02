@@ -7,8 +7,6 @@ ExecuteSafeCommandTool 클래스 정의입니다.
 import subprocess
 import re
 import shlex
-import os
-import time
 from typing import Any, Dict, Optional
 
 from .tool import Tool, generate_parameters_schema_from_hints
@@ -175,11 +173,3 @@ class ExecuteSafeCommandTool(Tool):
         except ValueError:  # shlex.split 실패
             return False
     
-    def _validate_path_access(self, path: str) -> bool:
-        """경로 접근 권한 검증"""
-        abs_path = os.path.abspath(path)
-        
-        for allowed_path in self.allowed_paths:
-            if abs_path.startswith(os.path.abspath(allowed_path)):
-                return True
-        return False 
