@@ -17,19 +17,16 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 Selvage 평가 에이�
 - [프롬프트 및 컨텍스트](docs/architecture/prompts-and-context.md) - LLM 프롬프트, 쿼리 분석
 
 ### 구현 가이드
-- [핵심 구현](docs/implementation/core-implementation.md) - SelvageEvaluationAgent 클래스
-- [도구 구현](docs/implementation/tool-implementations.md) - 범용 도구 클래스들
-- [상태 관리](docs/implementation/state-management.md) - WorkingMemory, SessionState
+
 
 ### 단계별 구현 명세서
-- [Phase 1-2: 커밋 수집 및 리뷰 실행](docs/specs/02-commit-collection-and-review-execution.md)
-- [Phase 3-4: 평가 변환 및 분석](docs/specs/03-evaluation-conversion-and-analysis.md)
+- [Phase 1: 커밋 수집 및 리뷰 실행](docs/specs/02-commit-collection.md)
+- [Phase 2: 리뷰 실행](docs/specs/03-review-execution.md)
 
 ### 배포 및 설정
 - [설정 및 배포](docs/deployment/configuration-deployment.md) - 설정 파일, 환경 설정
 
 ### 참조 문서
-- [Selvage 구조 분석 및 평가 컨텍스트](docs/rules/selvage-analysis-context.mdc)
 - [구현 가이드](docs/rules/selvage-eval-implementation-guide.md)
 
 ## 개발 환경
@@ -57,3 +54,5 @@ export GEMINI_API_KEY="your-key"
 - **타입 힌팅** 모든 함수에 필수
 - **Google 스타일 독스트링** 한국어 주석
 - 파일 패턴: `**/*.py`, `**/*.md`, `**/*.json`, `**/*.yaml`, `**/*.toml`
+- 타입 힌트 사용 필수
+- Dict 보다는 data class, pydantic 사용 필수
