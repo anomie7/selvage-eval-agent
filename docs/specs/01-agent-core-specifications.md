@@ -16,7 +16,7 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 현대적 에이전트
 ### 구현 가이드
 - [핵심 구현](../implementation/core-implementation.md) - SelvageEvaluationAgent 클래스
 - [도구 구현](../implementation/tool-implementations.md) - 범용 도구 클래스들
-- [상태 관리](../implementation/state-management.md) - WorkingMemory, SessionState
+- [상태 관리](../implementation/state-management.md) - SessionState
 
 ### 배포 및 설정
 - [설정 및 배포](../deployment/configuration-deployment.md) - 설정 파일, 환경 설정
@@ -130,12 +130,16 @@ selvage-eval-results/
 - **Python 3.10+** (타입 힌팅 필수)
 - **Google 스타일 독스트링** (한국어 주석)
 - **PEP 8 준수**
-- **비동기 처리** (다중 모델 병렬 평가)
 
 ### 핵심 의존성
 - `deepeval` - LLM 평가 프레임워크
 - `pytest` - 테스트 프레임워크
-- subprocess 실행 및 데이터 처리를 위한 표준 라이브러리
+- `subprocess` - 명령어 실행을 위한 표준 라이브러리
+- 표준 라이브러리 (`open()`, `json`, `os` 등) - 파일 I/O 및 데이터 처리
+
+### 제거된 의존성 (동기화 변경으로)
+- ~~`aiofiles`~~ → 표준 `open()` 함수 사용
+- ~~`asyncio`~~ → 동기적 처리로 변경
 
 ### 환경 설정
 ```bash

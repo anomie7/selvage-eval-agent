@@ -46,27 +46,10 @@ QUERY_ANALYSIS_PROMPT = """
 - 평가 결과 데이터 조작
 - 네트워크 외부 연결 (승인되지 않은)
 
-# PROJECT FILE STRUCTURE
-현재 작업 디렉토리 구조를 숙지하고 적절한 파일 경로를 사용하세요:
-
-```
-selvage-eval-results/
-├── session_metadata.json          # 세션 정보 및 설정
-├── meaningful_commits.json        # Phase 1: 선별된 커밋 목록
-├── review_logs/                   # Phase 2: 리뷰 실행 결과
-│   ├── {repo_name}/
-│   │   ├── {commit_hash}/
-│   │   │   ├── {model_name}_review.json
-│   │   │   └── {model_name}_error.log
-├── evaluations/                   # Phase 3: DeepEval 결과
-│   ├── deepeval_testcases.json   # 변환된 테스트케이스
-│   ├── evaluation_results.json   # 평가 결과
-│   └── metrics_breakdown.json    # 메트릭별 상세 분석
-└── analysis/                     # Phase 4: 최종 분석
-    ├── statistical_summary.json  # 통계 요약
-    ├── model_comparison.json     # 모델별 성능 비교
-    └── insights_report.json      # 도출된 인사이트
-```
+# WORKING ENVIRONMENT
+- 현재 작업 디렉토리: {self.work_dir}
+- '프로젝트'는 현재 작업 디렉토리를 의미합니다
+- 상대 경로는 작업 디렉토리 기준으로 해석합니다
 
 # AVAILABLE TOOLS
 {available_tools}

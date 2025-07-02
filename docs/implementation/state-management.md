@@ -1,67 +1,4 @@
-# 상태 관리 및 메모리
-
-## WorkingMemory
-
-```python
-class WorkingMemory:
-    """에이전트 작업 메모리"""
-    
-    def __init__(self, max_size: int = 1000):
-        self.max_size = max_size
-        self.memory = {}
-        self.access_count = {}
-        self.timestamps = {}
-    
-    def store(self, key: str, value: Any, ttl: Optional[int] = None):
-        """메모리에 저장"""
-        if len(self.memory) >= self.max_size:
-            self._evict_lru()
-        
-        self.memory[key] = value
-        self.access_count[key] = 0
-        self.timestamps[key] = time.time()
-        
-        if ttl:
-            asyncio.create_task(self._schedule_cleanup(key, ttl))
-    
-    def retrieve(self, key: str) -> Optional[Any]:
-        """메모리에서 조회"""
-        if key in self.memory:
-            self.access_count[key] += 1
-            return self.memory[key]
-        return None
-    
-    def remove(self, key: str):
-        """메모리에서 제거"""
-        if key in self.memory:
-            del self.memory[key]
-            del self.access_count[key]
-            del self.timestamps[key]
-    
-    def _evict_lru(self):
-        """LRU 정책으로 메모리 정리"""
-        if not self.memory:
-            return
-        
-        # 가장 적게 사용된 항목 제거
-        lru_key = min(self.access_count.items(), key=lambda x: x[1])[0]
-        self.remove(lru_key)
-    
-    async def _schedule_cleanup(self, key: str, ttl: int):
-        """TTL 기반 자동 정리"""
-        await asyncio.sleep(ttl)
-        self.remove(key)
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """메모리 사용 통계"""
-        return {
-            "total_items": len(self.memory),
-            "max_size": self.max_size,
-            "utilization": len(self.memory) / self.max_size,
-            "most_accessed": max(self.access_count.items(), key=lambda x: x[1])[0] if self.access_count else None,
-            "oldest_item": min(self.timestamps.items(), key=lambda x: x[1])[0] if self.timestamps else None
-        }
-```
+# 상태 관리
 
 ## SessionState
 
@@ -69,97 +6,108 @@ class WorkingMemory:
 class SessionState:
     """평가 세션 상태 관리"""
     
-    def __init__(self, session_id: str):
-        self.session_id = session_id
+    def __init__(self, session_id: Optional[str] = None):
+        self.session_id = session_id or self._generate_session_id()
         self.start_time = datetime.now()
         self.current_phase = None
         self.phase_states = {}
         self.global_state = {}
-        self.checkpoints = []
     
-    def save_checkpoint(self, phase: str, state: Dict[str, Any]):
-        """체크포인트 저장"""
-        checkpoint = {
-            "phase": phase,
-            "timestamp": datetime.now(),
-            "state": state,
-            "checkpoint_id": f"{phase}_{len(self.checkpoints)}"
-        }
-        self.checkpoints.append(checkpoint)
-    
-    def restore_checkpoint(self, checkpoint_id: str) -> Optional[Dict[str, Any]]:
-        """체크포인트 복원"""
-        for checkpoint in self.checkpoints:
-            if checkpoint["checkpoint_id"] == checkpoint_id:
-                return checkpoint["state"]
-        return None
-    
-    def update_phase_state(self, phase: str, key: str, value: Any):
-        """Phase별 상태 업데이트"""
+    def set_current_phase(self, phase: str):
+        """현재 실행 중인 Phase 설정"""
+        self.current_phase = phase
         if phase not in self.phase_states:
             self.phase_states[phase] = {}
-        self.phase_states[phase][key] = value
     
-    def get_phase_state(self, phase: str, key: str = None) -> Any:
-        """Phase별 상태 조회"""
+    def update_phase_state(self, phase: str, state_updates: Dict[str, Any]):
+        """특정 Phase의 상태 업데이트"""
         if phase not in self.phase_states:
-            return None
-        if key is None:
-            return self.phase_states[phase]
-        return self.phase_states[phase].get(key)
+            self.phase_states[phase] = {}
+        self.phase_states[phase].update(state_updates)
     
-    def persist_to_disk(self, file_path: str):
+    def get_phase_state(self, phase: str) -> Dict[str, Any]:
+        """특정 Phase의 상태 조회"""
+        return self.phase_states.get(phase, {})
+    
+    def update_global_state(self, state_updates: Dict[str, Any]):
+        """전역 상태 업데이트"""
+        self.global_state.update(state_updates)
+    
+    def mark_phase_completed(self, phase: str):
+        """Phase 완료 표시"""
+        self.update_phase_state(phase, {
+            "completed": True, 
+            "completed_at": datetime.now().isoformat()
+        })
+    
+    def is_phase_completed(self, phase: str) -> bool:
+        """Phase 완료 여부 확인"""
+        return self.phase_states.get(phase, {}).get("completed", False)
+    
+    def get_completed_phases(self) -> List[str]:
+        """완료된 Phase 목록 반환"""
+        completed = []
+        for phase in ["commit_collection", "review_execution", "deepeval_conversion", "analysis"]:
+            if self.is_phase_completed(phase):
+                completed.append(phase)
+        return completed
+    
+    async def persist_to_disk(self, file_path: str):
         """디스크에 상태 저장"""
         state_data = {
             "session_id": self.session_id,
             "start_time": self.start_time.isoformat(),
             "current_phase": self.current_phase,
             "phase_states": self.phase_states,
-            "global_state": self.global_state,
-            "checkpoints": [
-                {
-                    **cp,
-                    "timestamp": cp["timestamp"].isoformat()
-                }
-                for cp in self.checkpoints
-            ]
+            "global_state": self.global_state
         }
         
-        with open(file_path, 'w') as f:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(state_data, f, indent=2, ensure_ascii=False)
     
     @classmethod
-    def load_from_disk(cls, file_path: str) -> 'SessionState':
+    async def load_from_disk(cls, file_path: str) -> 'SessionState':
         """디스크에서 상태 복원"""
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             state_data = json.load(f)
         
-        session = cls(state_data["session_id"])
+        session = cls(session_id=state_data["session_id"])
         session.start_time = datetime.fromisoformat(state_data["start_time"])
         session.current_phase = state_data["current_phase"]
         session.phase_states = state_data["phase_states"]
         session.global_state = state_data["global_state"]
         
-        # 체크포인트 복원
-        for cp_data in state_data["checkpoints"]:
-            checkpoint = {
-                **cp_data,
-                "timestamp": datetime.fromisoformat(cp_data["timestamp"])
-            }
-            session.checkpoints.append(checkpoint)
-        
         return session
+    
+    async def auto_persist(self, output_dir: str, interval: int = 300):
+        """자동 영속화 시작 (5분마다)"""
+        state_file = os.path.join(output_dir, "session_state.json")
+        
+        async def persist_loop():
+            while True:
+                try:
+                    await asyncio.sleep(interval)
+                    await self.persist_to_disk(state_file)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Auto-persist failed: {e}")
+        
+        task = asyncio.create_task(persist_loop())
+        return task
     
     def get_session_summary(self) -> Dict[str, Any]:
         """세션 요약 정보"""
         duration = datetime.now() - self.start_time
+        completed_phases = self.get_completed_phases()
+        
         return {
             "session_id": self.session_id,
             "start_time": self.start_time.isoformat(),
             "duration_seconds": duration.total_seconds(),
             "current_phase": self.current_phase,
-            "completed_phases": list(self.phase_states.keys()),
-            "checkpoint_count": len(self.checkpoints)
+            "completed_phases": completed_phases
         }
 ```
 
@@ -225,9 +173,6 @@ class ResourceManager:
     
     async def _handle_memory_limit(self):
         """메모리 한계 처리"""
-        # 캐시 정리
-        await self._clear_caches()
-        
         # 가비지 컬렉션 강제 실행
         import gc
         gc.collect()

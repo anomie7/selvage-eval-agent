@@ -15,14 +15,19 @@ AI 기반 코드 리뷰 도구인 Selvage를 평가하는 자동화 에이전트
 - **Python 3.10+** (타입 힌팅 필수)
 - **Google 스타일 독스트링** (한국어 주석)
 - **PEP 8 준수**
-- **비동기 처리** (다중 모델 병렬 평가)
+- **토큰 계산**: Gemini count_token API 사용 (현재는 fallback 구현)
 
 ## Single Agent 아키텍처 패러다임
 
 ### ReAct (Reasoning + Acting) 패턴
 Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 두 가지 모드를 지원합니다:
-1. **자동 실행 모드**: 4단계 워크플로우 순차 실행
-2. **대화형 모드**: 사용자 요청에 따른 동적 액션 실행
+1. **자동 실행 모드**: 4단계 워크플로우 동기적 순차 실행
+2. **대화형 모드**: 사용자 요청에 따른 동기적 액션 실행
+
+### 동기 처리 아키텍처 특징
+- **간소화된 실행 플로우**: async/await 제거로 코드 복잡도 감소
+- **명확한 에러 처리**: 동기적 스택 트레이스로 디버깅 용이
+- **표준 라이브러리 활용**: Python 기본 기능 최대 활용
 
 ### Interactive Agent Interface
 
@@ -53,6 +58,10 @@ Selvage 평가 에이전트는 단일 에이전트가 ReAct 패턴으로 두 가
    - "평가 결과 요약해줘"
    - "모델별 성능 비교해줘"
    - "어떤 모델이 가장 좋아?"
+
+6. **대화형 모드 특수 명령어 (새로 추가됨)**
+   - "/clear": 대화 히스토리 초기화
+   - "/context": 현재 컨텍스트 사용량 확인
 
 #### LLM-Based Query Analysis System
 
@@ -90,7 +99,7 @@ QUERY_ANALYSIS_PROMPT = """
 # STRICT CONSTRAINTS
 다음 작업들은 절대 수행하지 마세요:
 
-🚫 **절대 금지:**
+**[FORBIDDEN] 절대 금지:**
 - 원본 저장소 파일 수정/삭제
 - selvage-deprecated 저장소 쓰기 작업
 - 시스템 파일 접근
@@ -193,21 +202,21 @@ class SelvageEvaluationAgent:
     
     def __init__(self, config: EvaluationConfig):
         self.config = config
-        self.tools = self._initialize_tools()
-        self.working_memory = WorkingMemory()
         self.session_state = SessionState()
         self.current_phase = None
         self.llm = self._initialize_llm()  # Query Planning용 LLM
         self.is_interactive_mode = False
     
-    async def handle_user_message(self, message: str) -> str:
+    def handle_user_message(self, message: str) -> str:
         """
-        현대적 에이전트 패턴으로 사용자 메시지 처리
+        개선된 대화형 메시지 처리 (대화 히스토리 관리 포함)
         
         Flow:
-        1. LLM이 쿼리 분석 및 실행 계획 수립
-        2. 계획에 따라 도구들 실행  
-        3. 도구 결과를 바탕으로 LLM이 최종 응답 생성
+        1. 특수 명령어 처리 (/clear, /context)
+        2. 대화 히스토리를 포함한 실행 계획 수립
+        3. 계획에 따라 도구들 실행  
+        4. 도구 결과를 바탕으로 최종 응답 생성
+        5. 대화 히스토리에 추가
         """
         try:
             # 1. LLM 기반 쿼리 분석 및 실행 계획 수립
@@ -447,13 +456,13 @@ class SelvageEvaluationAgent:
 
 Claude Code, Cursor와 같은 현대적 에이전트 패턴을 적용하여 **범용 도구 + 적절한 제약** 방식을 사용합니다:
 
-**🔧 핵심 범용 도구 (모든 작업에 사용)**
+**[TOOLS] 핵심 범용 도구 (모든 작업에 사용)**
 - `read_file`: 안전한 파일 읽기 (평가 결과 디렉토리 내에서만)
 - `write_file`: 안전한 파일 쓰기 (결과 저장용)
 - `execute_safe_command`: 제한된 안전 명령어 실행
 - `list_directory`: 디렉토리 탐색 (허용된 경로 내에서만)
 
-**📂 프로젝트 파일 구조 (LLM이 숙지해야 할 컨텍스트)**
+**[STRUCTURE] 프로젝트 파일 구조 (LLM이 숙지해야 할 컨텍스트)**
 ```
 selvage-eval-results/
 ├── session_metadata.json          # 세션 정보 및 설정
@@ -473,7 +482,7 @@ selvage-eval-results/
     └── insights_report.json      # 도출된 인사이트
 ```
 
-**🛡️ 안전 제약사항 (execute_safe_command용)**
+**[SECURITY] 안전 제약사항 (execute_safe_command용)**
 
 허용된 명령어:
 ```bash
@@ -502,7 +511,7 @@ git commit, git push, git merge
 echo >, sed -i, awk (파일 수정 명령)
 ```
 
-**🎯 실제 사용 예시**
+**[EXAMPLE] 실제 사용 예시**
 
 사용자: "cline 저장소에서 최근 일주일 내 fix 관련 커밋만 보여줘"
 
@@ -1136,102 +1145,107 @@ class PhaseTransitionManager:
         return self.transition_rules.get(current_phase)
 ```
 
-## 상태 관리 및 메모리
-
-### Working Memory
-```python
-class WorkingMemory:
-    """에이전트 작업 메모리"""
-    
-    def __init__(self, max_size: int = 1000):
-        self.max_size = max_size
-        self.memory = {}
-        self.access_count = {}
-        self.timestamps = {}
-    
-    def store(self, key: str, value: Any, ttl: Optional[int] = None):
-        """메모리에 저장"""
-        if len(self.memory) >= self.max_size:
-            self._evict_lru()
-        
-        self.memory[key] = value
-        self.access_count[key] = 0
-        self.timestamps[key] = time.time()
-        
-        if ttl:
-            asyncio.create_task(self._schedule_cleanup(key, ttl))
-    
-    def retrieve(self, key: str) -> Optional[Any]:
-        """메모리에서 조회"""
-        if key in self.memory:
-            self.access_count[key] += 1
-            return self.memory[key]
-        return None
-    
-    def _evict_lru(self):
-        """LRU 정책으로 메모리 정리"""
-        if not self.memory:
-            return
-        
-        # 가장 적게 사용된 항목 제거
-        lru_key = min(self.access_count.items(), key=lambda x: x[1])[0]
-        self.remove(lru_key)
-    
-    async def _schedule_cleanup(self, key: str, ttl: int):
-        """TTL 기반 자동 정리"""
-        await asyncio.sleep(ttl)
-        self.remove(key)
-```
+## 상태 관리
 
 ### Session State Management
 ```python
 class SessionState:
     """평가 세션 상태 관리"""
     
-    def __init__(self, session_id: str):
-        self.session_id = session_id
+    def __init__(self, session_id: Optional[str] = None):
+        self.session_id = session_id or self._generate_session_id()
         self.start_time = datetime.now()
         self.current_phase = None
         self.phase_states = {}
         self.global_state = {}
-        self.checkpoints = []
+        
+        # 대화 히스토리 관리 (추가됨)
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.context_window_size: int = 8000  # 토큰 기준 (Gemini count_token API 사용)
+        self.max_history_entries: int = 50    # 최대 대화 수
     
-    def save_checkpoint(self, phase: str, state: Dict[str, Any]):
-        """체크포인트 저장"""
-        checkpoint = {
-            "phase": phase,
-            "timestamp": datetime.now(),
-            "state": state,
-            "checkpoint_id": f"{phase}_{len(self.checkpoints)}"
+    def set_current_phase(self, phase: str):
+        """현재 실행 중인 Phase 설정"""
+        self.current_phase = phase
+        if phase not in self.phase_states:
+            self.phase_states[phase] = {}
+    
+    def update_phase_state(self, phase: str, state_updates: Dict[str, Any]):
+        """특정 Phase의 상태 업데이트"""
+        if phase not in self.phase_states:
+            self.phase_states[phase] = {}
+        self.phase_states[phase].update(state_updates)
+    
+    def mark_phase_completed(self, phase: str):
+        """Phase 완료 표시"""
+        self.update_phase_state(phase, {
+            "completed": True, 
+            "completed_at": datetime.now().isoformat()
+        })
+    
+    def is_phase_completed(self, phase: str) -> bool:
+        """Phase 완료 여부 확인"""
+        return self.phase_states.get(phase, {}).get("completed", False)
+    
+    def add_conversation_turn(self, user_message: str, assistant_response: str, 
+                            tool_results: Optional[List[Dict[str, Any]]] = None) -> None:
+        """대화 턴 추가"""
+        turn = {
+            "timestamp": datetime.now().isoformat(),
+            "user_message": user_message,
+            "assistant_response": assistant_response,
+            "tool_results": tool_results or [],
+            "turn_id": len(self.conversation_history) + 1
         }
-        self.checkpoints.append(checkpoint)
+        self.conversation_history.append(turn)
+        
+        # 최대 대화 수 제한
+        if len(self.conversation_history) > self.max_history_entries:
+            self.conversation_history = self.conversation_history[-self.max_history_entries:]
     
-    def restore_checkpoint(self, checkpoint_id: str) -> Optional[Dict[str, Any]]:
-        """체크포인트 복원"""
-        for checkpoint in self.checkpoints:
-            if checkpoint["checkpoint_id"] == checkpoint_id:
-                return checkpoint["state"]
-        return None
+    def get_conversation_context(self) -> List[Dict[str, Any]]:
+        """현재 컨텍스트 반환 (토큰 제한 고려)"""
+        # Gemini count_token API를 사용하여 토큰 제한을 고려한 컨텍스트 반환
+        # TODO: 실제 Gemini API 구현 후 정확한 토큰 계산
+        return self.conversation_history[-10:]  # 간소화된 구현
     
-    def persist_to_disk(self, file_path: str):
+    def clear_conversation_history(self):
+        """대화 히스토리 초기화"""
+        self.conversation_history.clear()
+    
+    def get_context_stats(self) -> Dict[str, Any]:
+        """컨텍스트 사용량 통계"""
+        return {
+            "total_conversation_turns": len(self.conversation_history),
+            "context_turns": min(10, len(self.conversation_history)),
+            "current_context_tokens": self._count_tokens(self.conversation_history),  # Gemini API 사용
+            "max_context_tokens": self.context_window_size,
+            "context_utilization": min(1.0, len(self.conversation_history) / 10),
+            "max_history_entries": self.max_history_entries
+        }
+    
+    def _count_tokens(self, content: Any) -> int:
+        """Gemini count_token API를 사용한 토큰 수 계산
+        
+        TODO: 실제 Gemini API 구현
+        현재는 fallback 구현 사용
+        """
+        # 임시 구현 - 추후 실제 Gemini count_token API로 교체
+        return len(str(content)) // 4  # 대략적 추정
+    
+    async def persist_to_disk(self, file_path: str):
         """디스크에 상태 저장"""
         state_data = {
             "session_id": self.session_id,
             "start_time": self.start_time.isoformat(),
             "current_phase": self.current_phase,
             "phase_states": self.phase_states,
-            "global_state": self.global_state,
-            "checkpoints": [
-                {
-                    **cp,
-                    "timestamp": cp["timestamp"].isoformat()
-                }
-                for cp in self.checkpoints
-            ]
+            "global_state": self.global_state
         }
         
-        with open(file_path, 'w') as f:
-            json.dump(state_data, f, indent=2)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
 ```
 
 ## 에이전트 안전성 및 제약
