@@ -1,5 +1,5 @@
 # Selvage 평가 에이전트 설정
-agent_model: "gemini-2.5-flash"
+agent_model: "gemini-2.5-pro"
 
 evaluation:
   output_dir: "./selvage-eval-results"
