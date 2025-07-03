@@ -1,7 +1,5 @@
 import json
-import os
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
@@ -10,7 +8,6 @@ from ..tools.tool_result import ToolResult
 from ..tools.tool_executor import ToolExecutor
 from ..commit_collection import MeaningfulCommitsData
 from ..review_execution_summary import ReviewExecutionSummary
-# from ..utils.parameter_schema import generate_parameters_schema_from_hints
 
 
 class ReviewExecutorTool(Tool):
