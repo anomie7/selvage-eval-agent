@@ -19,7 +19,7 @@ class ExecuteSafeCommandTool(Tool):
     def __init__(self):
         self.allowed_commands = {
             'jq', 'grep', 'find', 'ls', 'cat', 'head', 'tail', 'wc',
-            'git', 'cp', 'mv', 'mkdir', 'touch'
+            'git', 'cp', 'mv', 'mkdir', 'touch', 'selvage'
         }
         self.allowed_paths = [
             './selvage-eval-results/',
@@ -159,12 +159,12 @@ class ExecuteSafeCommandTool(Tool):
             if base_command not in self.allowed_commands:
                 return False
             
-            # 특별 처리: git 명령어는 읽기 전용만 허용
+            # 특별 처리: git 명령어는 안전한 명령어만 허용
             if base_command == 'git':
                 if len(tokens) < 2:
                     return False
                 git_subcommand = tokens[1]
-                allowed_git_commands = {'log', 'show', 'diff', 'status', 'branch'}
+                allowed_git_commands = {'log', 'show', 'diff', 'status', 'branch', 'checkout', 'rev-parse'}
                 if git_subcommand not in allowed_git_commands:
                     return False
             

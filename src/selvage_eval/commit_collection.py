@@ -35,6 +35,15 @@ class CommitStats:
         """추가 라인 비율 (0.0 ~ 1.0)"""
         total = self.total_lines_changed
         return self.lines_added / total if total > 0 else 0.0
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CommitStats':
+        """딕셔너리에서 CommitStats 객체 생성"""
+        return cls(
+            files_changed=data['files_changed'],
+            lines_added=data['lines_added'],
+            lines_deleted=data['lines_deleted']
+        )
 
 
 @dataclass
@@ -50,6 +59,18 @@ class CommitScore:
     def __post_init__(self):
         """점수 범위 검증"""
         self.total_score = max(0, min(100, self.total_score))
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CommitScore':
+        """딕셔너리에서 CommitScore 객체 생성"""
+        return cls(
+            total_score=data['total_score'],
+            file_type_penalty=data['file_type_penalty'],
+            scale_appropriateness_score=data['scale_appropriateness_score'],
+            commit_characteristics_score=data['commit_characteristics_score'],
+            time_weight_score=data['time_weight_score'],
+            additional_adjustments=data['additional_adjustments']
+        )
 
 
 @dataclass
@@ -68,6 +89,19 @@ class CommitData:
         data = asdict(self)
         data['date'] = self.date.isoformat()
         return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CommitData':
+        """딕셔너리에서 CommitData 객체 생성"""
+        return cls(
+            id=data['id'],
+            message=data['message'],
+            author=data['author'],
+            date=datetime.fromisoformat(data['date']),
+            stats=CommitStats.from_dict(data['stats']),
+            score=CommitScore.from_dict(data['score']),
+            file_paths=data['file_paths']
+        )
 
 
 @dataclass
@@ -84,6 +118,17 @@ class RepositoryMetadata:
         data = asdict(self)
         data['filter_timestamp'] = self.filter_timestamp.isoformat()
         return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RepositoryMetadata':
+        """딕셔너리에서 RepositoryMetadata 객체 생성"""
+        return cls(
+            total_commits=data['total_commits'],
+            filtered_commits=data['filtered_commits'],
+            selected_commits=data['selected_commits'],
+            filter_timestamp=datetime.fromisoformat(data['filter_timestamp']),
+            processing_time_seconds=data['processing_time_seconds']
+        )
 
 
 @dataclass
@@ -102,6 +147,16 @@ class RepositoryResult:
             'commits': [commit.to_dict() for commit in self.commits],
             'metadata': self.metadata.to_dict()
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RepositoryResult':
+        """딕셔너리에서 RepositoryResult 객체 생성"""
+        return cls(
+            repo_name=data['repo_name'],
+            repo_path=data['repo_path'],
+            commits=[CommitData.from_dict(commit_data) for commit_data in data['commits']],
+            metadata=RepositoryMetadata.from_dict(data['metadata'])
+        )
 
 
 @dataclass
@@ -121,6 +176,19 @@ class MeaningfulCommitsData:
     def total_commits(self) -> int:
         """전체 선별된 커밋 수"""
         return sum(len(repo.commits) for repo in self.repositories)
+    
+    @classmethod
+    def from_json(cls, filepath: str) -> 'MeaningfulCommitsData':
+        """JSON 파일에서 MeaningfulCommitsData 객체 생성"""
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        repositories = [
+            RepositoryResult.from_dict(repo_data) 
+            for repo_data in data['repositories']
+        ]
+        
+        return cls(repositories=repositories)
 
 
 class CommitCollector:
