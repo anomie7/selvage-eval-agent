@@ -7,7 +7,6 @@ import time
 from typing import Any, Dict, List
 
 from .tool_result import ToolResult
-from .tool_generator import ToolGenerator
 
 
 class ToolExecutor:
@@ -28,6 +27,8 @@ class ToolExecutor:
         """
         start_time = time.time()
         try:
+            # Lazy import to avoid circular dependency
+            from .tool_generator import ToolGenerator
             tool = ToolGenerator().generate_tool(tool_name, parameters)
             
             # 파라미터 검증

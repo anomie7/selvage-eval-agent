@@ -11,6 +11,7 @@ from .write_file_tool import WriteFileTool
 from .file_exists_tool import FileExistsTool
 from .execute_safe_command_tool import ExecuteSafeCommandTool
 from .list_directory_tool import ListDirectoryTool
+from .review_executor_tool import ReviewExecutorTool
 
 
 class ToolGenerator:
@@ -28,5 +29,7 @@ class ToolGenerator:
             return ExecuteSafeCommandTool()
         elif tool_name == "list_directory":
             return ListDirectoryTool()
+        elif tool_name == "execute_reviews":  # 새로 추가
+            return ReviewExecutorTool()
         else:
             raise ValueError(f"Unknown tool: {tool_name}") 
