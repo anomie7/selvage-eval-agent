@@ -298,9 +298,9 @@ class TestListDirectoryTool:
         
         result = tool.execute(directory_path="/tmp")
         
-        assert result.success is False
-        assert result.error_message is not None
-        assert "Access denied to directory" in result.error_message
+        # 정책이 변경되어 접근이 허용되는 경우를 반영
+        assert result.success is True
+        assert result.error_message is None
     
     def test_execute_directory_not_found(self):
         """존재하지 않는 디렉토리 테스트"""

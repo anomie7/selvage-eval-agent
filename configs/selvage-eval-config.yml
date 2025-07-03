@@ -10,18 +10,15 @@ target_repositories:
     path: /Users/demin_coder/Dev/cline
     tech_stack: typescript
     description: "typescript로 구현된 coding assistant"
+    access_mode: readonly  # 읽기 전용 접근
     filter_overrides:
-      min_changed_lines: 30  # TS는 더 작은 단위 변경 허용
-      file_types: [".ts", ".tsx", ".js", ".jsx"]
+      min_changed_lines: 30
       
   - name: selvage-deprecated
     path: /Users/demin_coder/Dev/selvage-deprecated
-    tech_stack: mixed
-    description: "selvage 이전 버전 commit history"
+    tech_stack: python
+    description: "LLM 기반 코드 리뷰 도구 selvage 이전 버전 commit history"
     access_mode: readonly  # 읽기 전용 접근
-    security_constraints:
-      - no_write_operations
-      - review_target_only
     filter_overrides:
       min_changed_lines: 50
       
@@ -29,17 +26,17 @@ target_repositories:
     path: /Users/demin_coder/Dev/ecommerce-microservices
     tech_stack: java_spring
     description: "java, spring, jpa로 구현된 MSA 서버 애플리케이션"
+    access_mode: readonly  # 읽기 전용 접근
     filter_overrides:
-      min_changed_lines: 100  # Java는 더 큰 단위 변경
-      file_types: [".java", ".kt", ".xml"]
+      min_changed_lines: 100
       
   - name: kotlin-realworld
     path: /Users/demin_coder/Dev/kotlin-realworld
     tech_stack: kotlin_jpa
     description: "java, kotlin, jpa로 구현된 호텔 예약 서버 애플리케이션"
+    access_mode: readonly  # 읽기 전용 접근
     filter_overrides:
       min_changed_lines: 80
-      file_types: [".kt", ".java"]
 
 review_models:
   - "gemini-2.5-pro"
@@ -47,9 +44,6 @@ review_models:
   - "claude-sonnet-4-thinking"
 
 commit_filters:
-  keywords:
-    include: ["fix", "feature", "refactor", "improve", "add", "update"]
-    exclude: ["typo", "format", "style", "docs", "chore"]
   stats:
     min_files: 2
     max_files: 10

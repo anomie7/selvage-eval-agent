@@ -10,9 +10,7 @@ import logging
 import os
 import re
 
-from selvage_eval.tools.execution_plan import ExecutionPlan
 from selvage_eval.tools.tool import Tool
-from selvage_eval.tools.tool_call import ToolCall
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult
 from selvage_eval.tools.read_file_tool import ReadFileTool
@@ -731,28 +729,6 @@ class SelvageEvaluationAgent:
                 error_message=str(e)
             )
     
-    def _validate_plan_safety(self, plan: ExecutionPlan) -> bool:
-        """Validate execution plan safety
-        
-        Args:
-            plan: Execution plan to validate
-            
-        Returns:
-            Safety validation result
-        """
-        # Check forbidden tools
-        forbidden_tools = ["delete_file", "modify_repository", "system_command"]
-        for tool_call in plan.tool_calls:
-            if tool_call.tool in forbidden_tools:
-                return False
-        
-        # Check selvage-deprecated write operations
-        for tool_call in plan.tool_calls:
-            if "selvage-deprecated" in str(tool_call.params) and tool_call.tool.startswith("write"):
-                return False
-        
-        return True
-    
     def _handle_special_command(self, command: str) -> str:
         """특수 명령어 처리
         
@@ -1046,48 +1022,6 @@ class SelvageEvaluationAgent:
 각 도구 호출 시 명확한 이유와 함께 적절한 파라미터를 제공해주세요.
 
 안전성을 고려하여 파일 시스템 작업이나 명령어 실행 시 주의깊게 검토해주세요."""
-    
-    def _parse_execution_plan(self, response: Any) -> ExecutionPlan:
-        """Function call 응답을 ExecutionPlan 객체로 변환합니다"""
-        
-        tool_calls = []
-        
-        # Gemini function calling 응답 처리
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
-                for part in candidate.content.parts:
-                    if hasattr(part, 'function_call') and part.function_call is not None:
-                        function_call = part.function_call
-                        if hasattr(function_call, 'name') and function_call.name:
-                            tool_call = ToolCall(
-                                tool=function_call.name,
-                                params=dict(function_call.args) if hasattr(function_call, 'args') else {},
-                                rationale=f"LLM이 {function_call.name} 도구를 선택함"
-                            )
-                            tool_calls.append(tool_call)
-        
-        # tool_calls가 없는 경우 기본 계획 생성
-        if not tool_calls:
-            # 응답에서 텍스트 내용 추출하여 의도 파악
-            intent_summary = "사용자 요청을 처리하기 위한 계획 수립"
-            if hasattr(response, 'text') and response.text:
-                intent_summary = f"텍스트 응답: {response.text[:100]}..."
-        else:
-            intent_summary = f"{len(tool_calls)}개의 도구 호출을 통한 작업 수행"
-        
-        # ExecutionPlan 객체 생성
-        execution_plan = ExecutionPlan(
-            intent_summary=intent_summary,
-            confidence=0.9,  # Function calling의 경우 높은 신뢰도
-            parameters={},
-            tool_calls=tool_calls,
-            safety_check="Function calling 방식으로 안전성 검증됨",
-            expected_outcome="도구 호출을 통한 요청 처리 완료 예상"
-        )
-        
-        return execution_plan
-    
     
     def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
         """LLM 응답에서 JSON을 추출하고 파싱합니다

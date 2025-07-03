@@ -6,7 +6,9 @@
 import argparse
 import sys
 import logging
-from pathlib import Path
+
+from selvage_eval.commit_collection import CommitCollector
+from selvage_eval.tools.tool_executor import ToolExecutor
 
 from .config.settings import load_config, get_default_config_path
 from .agent.core_agent import SelvageEvaluationAgent
@@ -122,6 +124,12 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="로그 레벨 (기본값: INFO)"
     )
+
+    parser.add_argument(
+        "--commit-collection", "-cc",
+        action="store_true",
+        help="커밋 수집 모드"
+    )
     
     args = parser.parse_args()
     
@@ -139,6 +147,13 @@ def main() -> None:
             config.workflow.skip_existing.commit_filtering = False
             config.workflow.skip_existing.review_results = False
             print("[FORCE] 강제 재실행 모드가 활성화되었습니다.")
+        
+        if args.commit_collection:
+            commit_collector = CommitCollector(config, ToolExecutor())
+            meaningful_commits_data = commit_collector.collect_commits()
+            meaningful_commits_data.save_to_json(config.get_output_path("meaningful_commits.json"))
+            print(f"[SUCCESS] 커밋 수집이 완료되었습니다. 결과: {config.get_output_path('meaningful_commits.json')}")
+            return
         
         # 에이전트 생성
         agent = SelvageEvaluationAgent(config)
