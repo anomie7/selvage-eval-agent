@@ -36,11 +36,6 @@ class TargetRepository(BaseModel):
         return v
 
 
-class CommitKeywords(BaseModel):
-    """커밋 키워드 필터"""
-    include: List[str]
-    exclude: List[str]
-
 
 class CommitStats(BaseModel):
     """커밋 통계 필터"""
@@ -59,7 +54,6 @@ class MergeHandling(BaseModel):
 
 class CommitFilters(BaseModel):
     """커밋 필터링 설정"""
-    keywords: CommitKeywords
     stats: CommitStats
     merge_handling: MergeHandling
 

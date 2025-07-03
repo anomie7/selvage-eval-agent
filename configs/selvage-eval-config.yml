@@ -44,9 +44,6 @@ review_models:
   - "claude-sonnet-4-thinking"
 
 commit_filters:
-  keywords:
-    include: ["fix", "feature", "refactor", "improve", "add", "update"]
-    exclude: ["typo", "format", "style", "docs", "chore"]
   stats:
     min_files: 2
     max_files: 10
