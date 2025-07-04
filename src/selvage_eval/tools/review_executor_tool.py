@@ -1,5 +1,7 @@
 import json
 import time
+import yaml
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
@@ -8,6 +10,9 @@ from ..tools.tool_result import ToolResult
 from ..tools.tool_executor import ToolExecutor
 from ..commit_collection import MeaningfulCommitsData
 from ..review_execution_summary import ReviewExecutionSummary
+
+# 기본 출력 디렉토리 상수
+DEFAULT_REVIEW_OUTPUT_DIR = '~/Library/selvage-eval/review_logs'
 
 
 class ReviewExecutorTool(Tool):
@@ -33,7 +38,7 @@ class ReviewExecutorTool(Tool):
             "properties": {
                 "meaningful_commits_path": {"type": "string"},
                 "model": {"type": "string"},
-                "output_dir": {"type": "string", "default": "~/Library/selvage-eval-agent/review_logs"}
+                "output_dir": {"type": "string", "default": DEFAULT_REVIEW_OUTPUT_DIR}
             },
             "required": ["meaningful_commits_path", "model"]
         }
@@ -51,7 +56,7 @@ class ReviewExecutorTool(Tool):
     
     def execute(self, meaningful_commits_path: str, 
                 model: str,
-                output_dir: str = '~/Library/selvage-eval-agent/review_logs') -> ToolResult:
+                output_dir: str = DEFAULT_REVIEW_OUTPUT_DIR) -> ToolResult:
         """리뷰 실행
         
         Args:
@@ -72,7 +77,10 @@ class ReviewExecutorTool(Tool):
             output_path = Path(output_dir).expanduser()
             output_path.mkdir(parents=True, exist_ok=True)
             
-            # 3. 각 저장소별 커밋 리뷰 실행
+            # 3. metadata 파일 생성
+            self._create_metadata_file(output_path, meaningful_commits)
+            
+            # 4. 각 저장소별 커밋 리뷰 실행
             total_commits = sum(len(repo.commits) for repo in meaningful_commits.repositories)
             total_successes = 0
             total_failures = 0
@@ -241,3 +249,52 @@ class ReviewExecutorTool(Tool):
                 "timeout": 60
             }
         )
+    
+    def _create_metadata_file(self, output_path: Path, meaningful_commits: 'MeaningfulCommitsData'):
+        """metadata 파일 생성"""
+        try:
+            # Selvage 버전 조회
+            selvage_version = self._get_selvage_version()
+            
+            # 대상 저장소 경로들 수집
+            repo_paths = [repo.repo_path for repo in meaningful_commits.repositories]
+            
+            # metadata 생성
+            metadata = {
+                "selvage_version": selvage_version,
+                "execution_date": datetime.now().isoformat(),
+                "target_repo_paths": repo_paths,
+                "total_repositories": len(meaningful_commits.repositories),
+                "total_commits": sum(len(repo.commits) for repo in meaningful_commits.repositories)
+            }
+            
+            # metadata.yml 파일 저장
+            metadata_path = output_path / "metadata.yml"
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                yaml.dump(metadata, f, default_flow_style=False, allow_unicode=True)
+                
+            print(f"Metadata 파일 생성: {metadata_path}")
+            
+        except Exception as e:
+            print(f"Metadata 파일 생성 중 오류: {str(e)}")
+    
+    def _get_selvage_version(self) -> str:
+        """Selvage 버전 조회"""
+        try:
+            result = self.tool_executor.execute_tool_call(
+                "execute_safe_command",
+                {
+                    "command": "selvage --version",
+                    "cwd": ".",
+                    "capture_output": True,
+                    "timeout": 30
+                }
+            )
+            
+            if result.success:
+                return result.data["stdout"].strip()
+            else:
+                return "unknown"
+                
+        except Exception:
+            return "unknown"

@@ -5,7 +5,7 @@ Pydantic을 사용하여 타입 안전성과 검증을 보장합니다.
 """
 
 import os
-from typing import Dict, List, Optional, Any, Union
+from typing import List, Optional
 from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -165,6 +165,13 @@ class EvaluationConfig(BaseModel):
     def get_output_path(self, *path_parts: str) -> str:
         """출력 디렉토리 기준 경로 생성"""
         return os.path.join(self.evaluation.output_dir, *path_parts)
+    
+    def get_review_logs_path(self, session_id: Optional[str] = None) -> str:
+        """리뷰 로그 디렉토리 경로 반환"""
+        base_path = os.path.expanduser("~/Library/selvage-eval/review_logs")
+        if session_id:
+            return os.path.join(base_path, session_id)
+        return base_path
     
     def create_output_dirs(self) -> None:
         """필요한 출력 디렉토리 생성"""
