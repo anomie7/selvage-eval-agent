@@ -20,7 +20,7 @@ Selvage 결과를 DeepEval 형식으로 변환하고 평가
 
 **파일 저장 경로:**
 ```
-~/Library/selvage-eval/deep_eval_test_case/{session_id}/{repo_name}/{model_name}/
+~/Library/selvage-eval/deep_eval_test_case/{session_id}/{model_name}/
 ```
 
 **DeepEval 테스트 케이스 형식:**
@@ -52,13 +52,13 @@ correctness = GEval(
     name="Correctness",
     model="gemini-2.5-pro",
     evaluation_steps=[
-        "입력 코드에서 발견된 모든 관련 주요 이슈(버그, 보안 취약점, 성능 문제, 중대한 스타일/설계 결함)가 'issues' 배열에 보고되었는지 확인",
-        "'issues' 배열이 비어있는 경우, 입력 코드를 비판적으로 평가하여 탐지 실패가 아닌 실제 이슈 부재인지 확인",
-        "이슈가 보고된 경우, 파일명과 라인 번호의 정확성 확인",
-        "이슈 유형(버그, 보안, 성능, 스타일, 설계)이 해당 코드에 적절한지 평가",
-        "심각도 수준(info, warning, error)이 각 이슈의 실제 영향에 따라 적절히 할당되었는지 확인",
-        "이슈 설명이 코드 변경의 영향을 정확하고 사실적으로 반영하는지 검토",
-        "'issues' 배열이 정당하게 비어있는 경우, 'summary'가 시스템 프롬프트 가이드라인에 따라 적절히 명시하는지 확인"
+        "Verify that all pertinent issues (e.g., bugs, security vulnerabilities, performance issues, significant style/design flaws) found in the input code are reported in the 'issues' array.",
+        "If the 'issues' array in the output is empty, critically assess the input code to confirm this emptiness is justified by an actual absence of pertinent issues, not a failure of detection.",
+        "If issues are reported, check if their specified filenames and line numbers are accurate.",
+        "If issues are reported, evaluate if their identified types (bug, security, performance, style, design) are appropriate for the code.",
+        "If issues are reported, confirm if their severity levels (info, warning, error) are assigned according to the actual impact of each issue.",
+        "If issues are reported, review if their descriptions accurately and factually reflect the impact of the code changes.",
+        "If the 'issues' array is legitimately empty (because no pertinent issues exist in the input code), verify that the 'summary' appropriately states this, aligning with system prompt guidelines.",
     ],
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
     threshold=0.7,
@@ -71,10 +71,10 @@ clarity = GEval(
     name="Clarity",
     model="gemini-2.5-pro",
     evaluation_steps=[
-        "전체 코드 리뷰 출력(요약, 이슈 설명, 제안, 권장사항)이 간결하고 직접적인 언어를 사용하는지 평가",
-        "이슈 설명과 제안, 권장사항이 구체적이고 명확한지 평가",
-        "코드 변경의 목적과 의도가 명확하게 이해 가능한지 검토",
-        "개선된 코드 예시가 제공되고 이해하기 쉬운지 확인"
+        "Evaluate whether the overall code review output (including summary, and if present, issue descriptions, suggestions, and recommendations) uses concise and direct language.",
+        "Assess whether issue descriptions and suggestions and recommendations are specific and clear.",
+        "Review if the purpose and intent of code changes are clearly understandable.",
+        "Verify that improved code examples are provided and easy to understand.",
     ],
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
     threshold=0.7,
@@ -87,11 +87,11 @@ actionability = GEval(
     name="Actionability",
     model="gemini-2.5-pro",
     evaluation_steps=[
-        "각 이슈에 대해 구체적인 해결책이 제시되었는지 확인",
-        "제안된 개선 사항이 실제로 구현 가능한지 평가",
-        "코드 개선 예시가 실제 코드베이스에 통합될 수 있을 만큼 구체적인지 검토",
-        "제안이 코드 품질, 성능, 보안 등의 측면에서 실질적인 개선을 가져올 수 있는지 평가",
-        "전반적인 권장사항이 프로젝트 맥락에서 실행 가능한지 확인"
+        "Check if specific solutions are provided for each issue.",
+        "Evaluate whether the suggested improvements are practically implementable.",
+        "Review if code improvement examples are specific enough to be integrated into the actual codebase.",
+        "Assess whether the suggestions can bring substantial improvements in terms of code quality, performance, security, etc.",
+        "Confirm that overall recommendations are actionable within the project context.",
     ],
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
     threshold=0.7,
@@ -121,6 +121,36 @@ jsoncorrectness = JsonCorrectnessMetric(
     model="gemini-2.5-pro-preview-05-06",
     include_reason=True,
 )
+
+# Structured Outputs용 스키마 클래스 (기본값 없음)
+class IssueSeverityEnum(str, Enum):
+    """이슈 심각도 열거형"""
+
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class StructuredReviewIssue(BaseModel):
+    """Structured Outputs용 코드 리뷰 이슈 모델"""
+
+    type: str
+    line_number: int | None
+    file: str | None
+    description: str
+    suggestion: str | None
+    severity: IssueSeverityEnum
+    target_code: str | None  # 리뷰 대상 코드
+    suggested_code: str | None  # 개선된 코드
+
+
+class StructuredReviewResponse(BaseModel):
+    """Structured Outputs용 코드 리뷰 응답 모델"""
+
+    issues: list[StructuredReviewIssue]
+    summary: str
+    score: float | None
+    recommendations: list[str]
 ```
 
 #### DeepEvalExecutorTool 인터페이스 명세
