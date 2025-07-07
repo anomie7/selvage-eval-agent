@@ -96,37 +96,6 @@ class SelvageConfig(BaseModel):
         return v
 
 
-class DeepEvalMetric(BaseModel):
-    """DeepEval 메트릭 설정"""
-    name: str
-    description: str
-    threshold: float = Field(ge=0.0, le=1.0)
-
-
-class DeepEvalConfig(BaseModel):
-    """DeepEval 설정"""
-    metrics: List[DeepEvalMetric]
-
-
-class SecurityConfig(BaseModel):
-    """보안 설정"""
-    allowed_paths: List[str]
-    forbidden_commands: List[str]
-
-
-class ResourceLimits(BaseModel):
-    """리소스 제한 설정"""
-    max_memory_mb: int = 2048
-    max_cpu_percent: int = 80
-    max_disk_gb: int = 10
-    max_execution_time: int = 3600
-
-
-class LoggingConfig(BaseModel):
-    """로깅 설정"""
-    level: str = "INFO"
-    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    file: Optional[str] = None
 
 
 class EvaluationConfig(BaseModel):
@@ -139,10 +108,6 @@ class EvaluationConfig(BaseModel):
     commits_per_repo: int = 5
     workflow: WorkflowConfig
     selvage: SelvageConfig
-    deepeval: DeepEvalConfig
-    security: SecurityConfig
-    resource_limits: ResourceLimits
-    logging: LoggingConfig
     
     @model_validator(mode='after')
     def validate_config(self):
@@ -181,11 +146,6 @@ class EvaluationConfig(BaseModel):
             self.get_output_path("evaluations"),
             self.get_output_path("analysis"),
         ]
-        
-        if self.logging.file:
-            log_dir = os.path.dirname(self.logging.file)
-            if log_dir:
-                dirs_to_create.append(log_dir)
         
         for dir_path in dirs_to_create:
             os.makedirs(dir_path, exist_ok=True)
