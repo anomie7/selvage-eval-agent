@@ -23,6 +23,8 @@ from selvage_eval.tools.write_file_tool import WriteFileTool
 from selvage_eval.tools.file_exists_tool import FileExistsTool
 from selvage_eval.tools.execute_safe_command_tool import ExecuteSafeCommandTool
 from selvage_eval.tools.list_directory_tool import ListDirectoryTool
+from selvage_eval.tools.deepeval_test_case_converter_tool import DeepEvalTestCaseConverterTool
+from selvage_eval.tools.deepeval_executor_tool import DeepEvalExecutorTool
 
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
@@ -830,7 +832,17 @@ class SelvageEvaluationAgent:
         
         # Phase 2: 리뷰 실행 (항상 실행)
         current_state = {"session_id": self.session_state.session_id}
-        self._execute_phase2_review_execution(current_state)
+        phase2_result = self._execute_phase2_review_execution(current_state)
+        
+        # Phase 3: DeepEval 변환 및 평가 실행 (Phase 2 성공 시에만 실행)
+        if phase2_result.get("status") == "completed":
+            logger.info("Phase 2 completed successfully, executing Phase 3")
+            phase3_result = self._execute_phase3_deepeval_conversion()
+            
+            # Phase 3 상태 업데이트
+            self._update_state(phase3_result)
+        else:
+            logger.warning("Phase 2 failed or incomplete, skipping Phase 3")
         
         # Generate final report
         return self._generate_final_report()
@@ -916,25 +928,23 @@ class SelvageEvaluationAgent:
             state["completed_phases"].append("review_execution")
         
         # Phase 3: Check DeepEval results
-        # Phase 3, 4는 현재 비활성화 (TODO: 추후 구현)
-        # Phase 3: DeepEval conversion - 미구현
-        # Phase 4: Analysis - 미구현
-        # eval_results_file = self.config.get_output_path("evaluations", "evaluation_results.json")
-        # eval_results_exist = self.execute_tool("file_exists", {"file_path": eval_results_file})
-        # if eval_results_exist.success and eval_results_exist.data.get("exists"):
-        #     state["completed_phases"].append("deepeval_conversion")
+        deepeval_results_dir = f"~/Library/selvage-eval/deepeval_results/{self.session_state.session_id}"
+        expanded_path = os.path.expanduser(deepeval_results_dir)
+        deepeval_list_result = self.execute_tool("list_directory", {"path": expanded_path})
+        if deepeval_list_result.success and deepeval_list_result.data.get("files"):
+            state["completed_phases"].append("deepeval_conversion")
         
-        # Determine next required phase (Phase 2까지만)
+        # Determine next required phase (Phase 3까지)
         if "commit_collection" not in state["completed_phases"]:
             state["next_required_phase"] = "commit_collection"
         elif "review_execution" not in state["completed_phases"]:
             state["next_required_phase"] = "review_execution"
-        # elif "deepeval_conversion" not in state["completed_phases"]:
-        #     state["next_required_phase"] = "deepeval_conversion"
+        elif "deepeval_conversion" not in state["completed_phases"]:
+            state["next_required_phase"] = "deepeval_conversion"
         # elif "analysis" not in state["completed_phases"]:
         #     state["next_required_phase"] = "analysis"
         else:
-            # Phase 2까지 완료되면 종료
+            # Phase 3까지 완료되면 종료
             state["next_required_phase"] = "complete"
         
         return state
@@ -1097,14 +1107,78 @@ class SelvageEvaluationAgent:
             }
     
     def _execute_phase3_deepeval_conversion(self) -> Dict[str, Any]:
-        """Phase 3: DeepEval conversion (TODO: 미구현)"""
-        # TODO: DeepEval 변환 및 평가 구현 필요
-        # - DeepEvalTestCaseConverterTool 구현
-        # - DeepEvalExecutorTool 구현
-        # - 리뷰 로그 스캔 및 변환 로직 구현
-        # - 4개 메트릭(Correctness, Clarity, Actionability, JsonCorrectness) 평가 실행
-        logger.info("Phase 3: DeepEval Conversion - 현재 미구현")
-        return {"phase": "deepeval_conversion", "status": "not_implemented", "message": "Phase 3 미구현"}
+        """Phase 3: DeepEval conversion and evaluation execution"""
+        start_time = time.time()
+        logger.info("Executing Phase 3: DeepEval Conversion and Evaluation")
+        
+        try:
+            # Step 1: DeepEval 테스트 케이스 변환
+            logger.info("Step 1: Converting review logs to DeepEval test cases")
+            converter_tool = DeepEvalTestCaseConverterTool()
+            
+            conversion_result = converter_tool.execute(
+                session_id=self.session_state.session_id,
+            )
+            
+            if not conversion_result.success:
+                raise Exception(f"DeepEval test case conversion failed: {conversion_result.error_message}")
+            
+            conversion_data = conversion_result.data
+            logger.info(f"Conversion completed: {conversion_data.get('total_files', 0)} model files converted")
+            
+            # Step 2: DeepEval 평가 실행
+            logger.info("Step 2: Executing DeepEval evaluation")
+            executor_tool = DeepEvalExecutorTool()
+            
+            evaluation_result = executor_tool.execute(
+                session_id=self.session_state.session_id,
+                parallel_workers=1,  # 기본값: 1
+                display_filter="all"
+            )
+            
+            if not evaluation_result.success:
+                raise Exception(f"DeepEval evaluation failed: {evaluation_result.error_message}")
+            
+            evaluation_data = evaluation_result.data
+            logger.info(f"Evaluation completed: {evaluation_data.get('total_evaluations', 0)} evaluations processed")
+            
+            # 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "deepeval_conversion",
+                "status": "completed",
+                "execution_time_seconds": round(execution_time, 2),
+                "conversion_results": {
+                    "total_files": conversion_data.get("total_files", 0),
+                    "converted_files": conversion_data.get("converted_files", []),
+                    "metadata_path": conversion_data.get("metadata_path")
+                },
+                "evaluation_results": {
+                    "total_evaluations": evaluation_data.get("total_evaluations", 0),
+                    "evaluation_results": evaluation_data.get("evaluation_results", {}),
+                    "metadata_path": evaluation_data.get("metadata_path")
+                },
+                "session_id": self.session_state.session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 3 completed successfully in {execution_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 3 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "deepeval_conversion",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
     def _execute_phase4_analysis(self) -> Dict[str, Any]:
         """Phase 4: Analysis (TODO: 미구현)"""
@@ -1155,8 +1229,7 @@ class SelvageEvaluationAgent:
             "target_repositories": [repo.model_dump() for repo in self.config.target_repositories],
             "configuration": {
                 "commits_per_repo": self.config.commits_per_repo,
-                "workflow": self.config.workflow.model_dump(),
-                "deepeval_metrics": [metric.model_dump() for metric in self.config.deepeval.metrics]
+                "workflow": self.config.workflow.model_dump()
             }
         }
         
