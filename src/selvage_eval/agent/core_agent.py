@@ -841,8 +841,18 @@ class SelvageEvaluationAgent:
             
             # Phase 3 상태 업데이트
             self._update_state(phase3_result)
+            
+            # Phase 4: 분석 실행 (Phase 3 성공 시에만 실행)
+            if phase3_result.get("status") == "completed":
+                logger.info("Phase 3 completed successfully, executing Phase 4")
+                phase4_result = self._execute_phase4_analysis()
+                
+                # Phase 4 상태 업데이트
+                self._update_state(phase4_result)
+            else:
+                logger.warning("Phase 3 failed or incomplete, skipping Phase 4")
         else:
-            logger.warning("Phase 2 failed or incomplete, skipping Phase 3")
+            logger.warning("Phase 2 failed or incomplete, skipping Phase 3 and 4")
         
         # Generate final report
         return self._generate_final_report()
@@ -934,17 +944,24 @@ class SelvageEvaluationAgent:
         if deepeval_list_result.success and deepeval_list_result.data.get("files"):
             state["completed_phases"].append("deepeval_conversion")
         
-        # Determine next required phase (Phase 3까지)
+        # Phase 4: Check analysis results
+        analysis_results_dir = f"~/Library/selvage-eval/analyze_results/{self.session_state.session_id}"
+        analysis_expanded_path = os.path.expanduser(analysis_results_dir)
+        analysis_list_result = self.execute_tool("list_directory", {"path": analysis_expanded_path})
+        if analysis_list_result.success and analysis_list_result.data.get("files"):
+            state["completed_phases"].append("analysis")
+        
+        # Determine next required phase
         if "commit_collection" not in state["completed_phases"]:
             state["next_required_phase"] = "commit_collection"
         elif "review_execution" not in state["completed_phases"]:
             state["next_required_phase"] = "review_execution"
         elif "deepeval_conversion" not in state["completed_phases"]:
             state["next_required_phase"] = "deepeval_conversion"
-        # elif "analysis" not in state["completed_phases"]:
-        #     state["next_required_phase"] = "analysis"
+        elif "analysis" not in state["completed_phases"]:
+            state["next_required_phase"] = "analysis"
         else:
-            # Phase 3까지 완료되면 종료
+            # 모든 Phase 완료
             state["next_required_phase"] = "complete"
         
         return state
@@ -1181,14 +1198,57 @@ class SelvageEvaluationAgent:
             }
     
     def _execute_phase4_analysis(self) -> Dict[str, Any]:
-        """Phase 4: Analysis (TODO: 미구현)"""
-        # TODO: 분석 기능 구현 필요
-        # - DeepEval 결과 통계 분석
-        # - 모델별 성능 비교
-        # - 패턴 분석 및 인사이트 도출
-        # - 실행 가능한 권장사항 생성
-        logger.info("Phase 4: Analysis - 현재 미구현")
-        return {"phase": "analysis", "status": "not_implemented", "message": "Phase 4 미구현"}
+        """Phase 4: Analysis"""
+        start_time = time.time()
+        logger.info("Executing Phase 4: DeepEval Results Analysis")
+        
+        try:
+            # DeepEval 결과 디렉토리 확인
+            deepeval_results_dir = f"~/Library/selvage-eval/deepeval_results/{self.session_state.session_id}"
+            expanded_path = os.path.expanduser(deepeval_results_dir)
+            
+            if not os.path.exists(expanded_path):
+                raise FileNotFoundError(f"DeepEval 결과 디렉토리를 찾을 수 없습니다: {expanded_path}")
+            
+            # 분석 엔진 초기화
+            from selvage_eval.analysis import DeepEvalAnalysisEngine
+            analysis_engine = DeepEvalAnalysisEngine()
+            
+            # 세션 분석 실행
+            analysis_results = analysis_engine.analyze_session(expanded_path)
+            
+            # 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "analysis",
+                "status": "completed",
+                "execution_time_seconds": round(execution_time, 2),
+                "analysis_results": {
+                    "models_analyzed": analysis_results["analysis_metadata"]["models_analyzed"],
+                    "total_test_cases": analysis_results["analysis_metadata"]["total_test_cases"],
+                    "files_generated": analysis_results["files_generated"]
+                },
+                "session_id": self.session_state.session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 4 completed successfully in {execution_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 4 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "analysis",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
     def _update_state(self, action_result: Dict[str, Any]) -> None:
         """Update state with action execution result
