@@ -26,7 +26,7 @@ class TestDeepEvalExecutorIntegration:
             executor_tool = DeepEvalExecutorTool()
             
             # 지정된 session_id로 execute 호출
-            session_id = 'eval_20250707_174243_e4df05f6'
+            session_id = 'eval_20250709_171605_6c030a11'
             execution_result = executor_tool.execute(
                 session_id=session_id,
                 parallel_workers=1,

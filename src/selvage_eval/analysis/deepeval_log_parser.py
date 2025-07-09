@@ -5,9 +5,12 @@
 
 import re
 import json
+import logging
 from pathlib import Path
 from typing import Iterator, Dict, Any, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,8 +40,8 @@ class DeepEvalLogParser:
     def __init__(self):
         self.test_case_separator = "=" * 70
         self.metrics_pattern = re.compile(
-            r'(✅|❌)\s+(\w+(?:\s+\w+)*)\s+.*?\(score:\s+([\d.]+),.*?reason:\s+"([^"]*)".*?error:\s+([^)]*)\)',
-            re.MULTILINE
+            r'(✅|❌)\s+([^[]+?)(?:\s*\[[^\]]*\])?\s+\(score:\s+([\d.]+),.*?reason:\s+(.*?),\s*error:\s+([^)]*)\)',
+            re.MULTILINE | re.DOTALL
         )
         
     def parse_log_file(self, log_path: Path) -> Iterator[TestCaseResult]:
@@ -59,6 +62,11 @@ class DeepEvalLogParser:
         for test_case_content in test_cases:
             test_case_content = test_case_content.strip()
             if test_case_content:
+                # "Overall Metric Pass Rates" 섹션 제외
+                if "Overall Metric Pass Rates" in test_case_content:
+                    logger.debug("'Overall Metric Pass Rates' 섹션 건너뛰기")
+                    continue
+                    
                 result = self._parse_test_case(test_case_content.split('\n'))
                 if result:
                     yield result
@@ -76,27 +84,46 @@ class DeepEvalLogParser:
         
         # 메트릭 정보 추출
         metrics = {}
-        for match in self.metrics_pattern.finditer(content):
+        matches = list(self.metrics_pattern.finditer(content))
+        
+        if not matches:
+            logger.warning(f"메트릭 정보를 찾을 수 없습니다. 컨텐츠 미리보기: {content[:200]}...")
+            logger.debug(f"전체 컨텐츠: {content}")
+        
+        logger.debug(f"총 {len(matches)}개의 메트릭 매칭 발견")
+        
+        for i, match in enumerate(matches):
             status_icon, metric_name, score, reason, error = match.groups()
             
+            logger.debug(f"매칭 {i+1}: icon={status_icon}, name='{metric_name}', score={score}")
+            logger.debug(f"reason 길이: {len(reason)} 문자")
+            
             # 메트릭명 정규화
-            metric_key = metric_name.lower().replace(' ', '_')
-            if metric_key == 'json_correctness':
+            metric_key = metric_name.strip().lower().replace(' ', '_')
+            if 'json' in metric_key and 'correctness' in metric_key:
                 metric_key = 'json_correctness'
             elif 'correctness' in metric_key:
                 metric_key = 'correctness'
+            elif 'clarity' in metric_key:
+                metric_key = 'clarity'
+            elif 'actionability' in metric_key:
+                metric_key = 'actionability'
+            
+            logger.debug(f"메트릭 파싱 성공: {metric_key} = {score} ({status_icon})")
             
             metrics[metric_key] = MetricScore(
                 score=float(score),
                 passed=status_icon == '✅',
-                reason=reason,
-                error=error if error != 'None' else None
+                reason=reason.strip(),
+                error=error.strip() if error and error != 'None' else None
             )
         
         # 필수 메트릭 확인
         required_metrics = ['correctness', 'clarity', 'actionability', 'json_correctness']
+        missing_metrics = []
         for metric in required_metrics:
             if metric not in metrics:
+                missing_metrics.append(metric)
                 # 누락된 메트릭은 기본값으로 설정
                 metrics[metric] = MetricScore(
                     score=0.0,
@@ -104,6 +131,9 @@ class DeepEvalLogParser:
                     reason="메트릭 정보 없음",
                     error="로그에서 메트릭 정보를 찾을 수 없음"
                 )
+        
+        if missing_metrics:
+            logger.warning(f"누락된 메트릭: {missing_metrics}")
         
         # 입력/출력 데이터 추출
         input_match = re.search(r'input:\s*(\[.*?\])', content, re.DOTALL)
@@ -114,7 +144,7 @@ class DeepEvalLogParser:
         
         # TestCaseResult 생성
         try:
-            return TestCaseResult(
+            result = TestCaseResult(
                 correctness=metrics['correctness'],
                 clarity=metrics['clarity'],
                 actionability=metrics['actionability'],
@@ -123,8 +153,10 @@ class DeepEvalLogParser:
                 actual_output=actual_output,
                 raw_content=content
             )
+            logger.debug(f"테스트 케이스 파싱 성공: {len(metrics)}개 메트릭")
+            return result
         except KeyError as e:
-            print(f"WARNING: 필수 메트릭 누락: {e}")
+            logger.error(f"필수 메트릭 누락: {e}")
             return None
     
     def convert_to_test_case_result(self, test_case_data: Dict[str, Any]) -> Optional[TestCaseResult]:

@@ -235,7 +235,10 @@ class SelvageEvaluationAgent:
             WriteFileTool(),
             FileExistsTool(),
             ExecuteSafeCommandTool(),
-            ListDirectoryTool()
+            ListDirectoryTool(),
+            ReviewExecutorTool(),
+            DeepEvalExecutorTool(),
+            DeepEvalTestCaseConverterTool()
         ]
     
     def plan_execution_loop(self, user_query: str, max_iterations: int = 25) -> str:

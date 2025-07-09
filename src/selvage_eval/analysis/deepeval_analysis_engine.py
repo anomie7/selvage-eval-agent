@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeepEvalAnalysisEngine:
-    """DeepEval 분석 엔진 V2 - 로그 파일 기반"""
+    """DeepEval 분석 엔진"""
     
     def __init__(self, output_dir: str = "~/Library/selvage-eval/analyze_results"):
         """분석 엔진 초기화
@@ -42,20 +42,28 @@ class DeepEvalAnalysisEngine:
         self.version_analyzer = VersionComparisonAnalyzer()
         self.visualizer = VisualizationGenerator()
     
-    def analyze_session(self, session_path: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
+    def analyze_session(self, session_id: str, 
+                       deepeval_results_path: Optional[str] = None,
+                       output_dir: Optional[str] = None) -> Dict[str, Any]:
         """세션 분석 실행
         
         Args:
-            session_path: DeepEval 로그 파일이 있는 세션 경로
+            session_id: 세션 ID
+            deepeval_results_path: DeepEval 결과 경로 (지정하지 않으면 session_id로 자동 검색)
             output_dir: 사용자 지정 출력 디렉토리 (선택사항)
             
         Returns:
             분석 결과 메타데이터
         """
-        session_path_obj = Path(session_path).expanduser()
-        
+        # DeepEval 결과 경로 확인
+        if deepeval_results_path:
+            session_path_obj = Path(deepeval_results_path).expanduser()
+        else:
+            default_base_path = Path("/Users/demin_coder/Library/selvage-eval/deepeval_results")
+            session_path_obj = default_base_path / session_id
+            
         if not session_path_obj.exists():
-            raise FileNotFoundError(f"세션 경로가 존재하지 않습니다: {session_path}")
+            raise FileNotFoundError(f"세션 경로가 존재하지 않습니다: {session_path_obj}")
         
         # 출력 디렉토리 설정
         if output_dir:
@@ -247,7 +255,14 @@ class DeepEvalAnalysisEngine:
         Returns:
             추출된 모델명
         """
-        # 다양한 패턴으로 모델명 추출 시도
+        # 상위 디렉토리에서 모델명 추출 (디렉토리 구조 기반)
+        parent_dir = log_file.parent.name
+        
+        # 유효한 모델명인지 확인
+        if parent_dir and parent_dir != 'deepeval_results':
+            return parent_dir
+        
+        # fallback: 파일명에서 추출 시도
         file_name = log_file.stem
         
         # deepeval_results_model_name.log 패턴

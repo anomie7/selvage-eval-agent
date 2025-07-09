@@ -66,20 +66,29 @@ class TestDeepEvalAnalysisEngine(unittest.TestCase):
     
     def test_extract_model_name_from_path(self):
         """모델명 추출 테스트"""
-        # deepeval_results_model_name.log 패턴
-        log_path1 = Path("/path/to/deepeval_results_gpt_4.log")
+        # 디렉토리 구조 기반 추출 (새로운 방식)
+        log_path1 = Path("/path/to/gemini-2.5-flash/test_run_20250708.log")
         model_name1 = self.engine._extract_model_name_from_path(log_path1)
-        self.assertEqual(model_name1, "gpt_4")
+        self.assertEqual(model_name1, "gemini-2.5-flash")
         
-        # model_name.log 패턴
-        log_path2 = Path("/path/to/claude_3.log") 
+        log_path2 = Path("/path/to/o3/test_run_20250708.log")
         model_name2 = self.engine._extract_model_name_from_path(log_path2)
-        self.assertEqual(model_name2, "claude")
+        self.assertEqual(model_name2, "o3")
+        
+        # fallback: deepeval_results_model_name.log 패턴
+        log_path3 = Path("/path/to/deepeval_results/deepeval_results_gpt_4.log")
+        model_name3 = self.engine._extract_model_name_from_path(log_path3)
+        self.assertEqual(model_name3, "gpt_4")
+        
+        # fallback: model_name.log 패턴
+        log_path4 = Path("/path/to/deepeval_results/claude_3.log")
+        model_name4 = self.engine._extract_model_name_from_path(log_path4)
+        self.assertEqual(model_name4, "claude")
         
         # 기본값 테스트
-        log_path3 = Path("/path/to/unknown.log")
-        model_name3 = self.engine._extract_model_name_from_path(log_path3)
-        self.assertEqual(model_name3, "unknown")
+        log_path5 = Path("/path/to/deepeval_results/unknown.log")
+        model_name5 = self.engine._extract_model_name_from_path(log_path5)
+        self.assertEqual(model_name5, "unknown")
     
     @patch('selvage_eval.analysis.deepeval_analysis_engine.DeepEvalLogParser')
     def test_collect_log_results(self, mock_parser_class):
@@ -93,8 +102,10 @@ class TestDeepEvalAnalysisEngine(unittest.TestCase):
         session_dir = self.temp_path / "test_session"
         session_dir.mkdir()
         
-        # 로그 파일 생성
-        log_file = session_dir / "deepeval_results_gpt_4.log"
+        # 디렉토리 구조 및 로그 파일 생성
+        model_dir = session_dir / "gpt_4"
+        model_dir.mkdir()
+        log_file = model_dir / "test_run.log"
         log_file.write_text("dummy log content")
         
         # 엔진에 모킹된 파서 할당
@@ -121,13 +132,13 @@ Input: {input_data}
 Expected: {expected}
 Actual: {actual}
 
-✅ Correctness (score: {correctness_score}, reason: "{correctness_reason}", error: None)
-✅ Clarity (score: {clarity_score}, reason: "{clarity_reason}", error: None)
-✅ Actionability (score: {actionability_score}, reason: "{actionability_reason}", error: None)
-✅ JSON Correctness (score: {json_score}, reason: "{json_reason}", error: None)
+✅ Correctness (score: {correctness_score}, reason: {correctness_reason}, error: None)
+✅ Clarity (score: {clarity_score}, reason: {clarity_reason}, error: None)
+✅ Actionability (score: {actionability_score}, reason: {actionability_reason}, error: None)
+✅ JSON Correctness (score: {json_score}, reason: {json_reason}, error: None)
 =================================================="""
         
-        # 여러 모델 로그 파일 생성
+        # 여러 모델 디렉토리 및 로그 파일 생성
         models_data = {
             "gpt_4": {"correctness_score": 0.9, "clarity_score": 0.85, "actionability_score": 0.8, "json_score": 1.0},
             "claude_3": {"correctness_score": 0.85, "clarity_score": 0.9, "actionability_score": 0.75, "json_score": 0.95},
@@ -135,7 +146,10 @@ Actual: {actual}
         }
         
         for model_name, scores in models_data.items():
-            log_file = session_dir / f"deepeval_results_{model_name}.log"
+            # 모델별 디렉토리 생성
+            model_dir = session_dir / model_name
+            model_dir.mkdir()
+            log_file = model_dir / "test_run.log"
             log_content = log_content_template.format(
                 test_case=f"Test case for {model_name}",
                 input_data=f"Input for {model_name}",
@@ -178,41 +192,41 @@ Actual: {actual}
         sub_dir2.mkdir(parents=True)
         
         # 중첩된 위치에 로그 파일 생성
-        log_file1 = sub_dir1 / "deepeval_results_gpt_4.log"
+        log_file1 = sub_dir1 / "test_run.log"
         log_file1.write_text("""==================================================
 Test Case: Nested test case 1
 Input: Nested input 1
 Expected: Nested expected 1
 Actual: Nested actual 1
 
-✅ Correctness (score: 0.8, reason: "Good nested analysis", error: None)
-✅ Clarity (score: 0.75, reason: "Clear nested output", error: None)
-✅ Actionability (score: 0.7, reason: "Actionable nested suggestions", error: None)
-✅ JSON Correctness (score: 0.95, reason: "Valid nested JSON", error: None)
+✅ Correctness (score: 0.8, reason: Good nested analysis, error: None)
+✅ Clarity (score: 0.75, reason: Clear nested output, error: None)
+✅ Actionability (score: 0.7, reason: Actionable nested suggestions, error: None)
+✅ JSON Correctness (score: 0.95, reason: Valid nested JSON, error: None)
 ==================================================""")
         
-        log_file2 = sub_dir2 / "deepeval_results_claude_3.log"  
+        log_file2 = sub_dir2 / "test_run.log"  
         log_file2.write_text("""==================================================
 Test Case: Nested test case 2
 Input: Nested input 2
 Expected: Nested expected 2
 Actual: Nested actual 2
 
-✅ Correctness (score: 0.85, reason: "Good nested analysis 2", error: None)
-✅ Clarity (score: 0.9, reason: "Clear nested output 2", error: None)
-✅ Actionability (score: 0.8, reason: "Actionable nested suggestions 2", error: None)
-✅ JSON Correctness (score: 1.0, reason: "Valid nested JSON 2", error: None)
+✅ Correctness (score: 0.85, reason: Good nested analysis 2, error: None)
+✅ Clarity (score: 0.9, reason: Clear nested output 2, error: None)
+✅ Actionability (score: 0.8, reason: Actionable nested suggestions 2, error: None)
+✅ JSON Correctness (score: 1.0, reason: Valid nested JSON 2, error: None)
 ==================================================""")
         
         # 테스트 실행
         results = self.engine._collect_log_results(session_dir)
         
-        # 결과 검증
+        # 결과 검증 - 디렉토리 이름으로 모델명 추출
         self.assertEqual(len(results), 2)
-        self.assertIn("gpt_4", results)
-        self.assertIn("claude_3", results)
-        self.assertEqual(len(results["gpt_4"]), 1)
-        self.assertEqual(len(results["claude_3"]), 1)
+        self.assertIn("gpt", results)
+        self.assertIn("claude", results)
+        self.assertEqual(len(results["gpt"]), 1)
+        self.assertEqual(len(results["claude"]), 1)
     
     def test_collect_log_results_malformed_logs(self):
         """잘못된 형식의 로그 파일 처리 테스트"""
@@ -221,25 +235,31 @@ Actual: Nested actual 2
         session_dir.mkdir()
         
         # 올바른 로그 파일 생성
-        good_log = session_dir / "deepeval_results_gpt_4.log"
+        good_model_dir = session_dir / "gpt_4"
+        good_model_dir.mkdir()
+        good_log = good_model_dir / "test_run.log"
         good_log.write_text("""==================================================
 Test Case: Good test case
 Input: Good input
 Expected: Good expected
 Actual: Good actual
 
-✅ Correctness (score: 0.8, reason: "Good analysis", error: None)
-✅ Clarity (score: 0.75, reason: "Clear output", error: None)
-✅ Actionability (score: 0.7, reason: "Actionable suggestions", error: None)
-✅ JSON Correctness (score: 0.95, reason: "Valid JSON", error: None)
+✅ Correctness (score: 0.8, reason: Good analysis, error: None)
+✅ Clarity (score: 0.75, reason: Clear output, error: None)
+✅ Actionability (score: 0.7, reason: Actionable suggestions, error: None)
+✅ JSON Correctness (score: 0.95, reason: Valid JSON, error: None)
 ==================================================""")
         
         # 잘못된 형식의 로그 파일 생성
-        bad_log = session_dir / "deepeval_results_claude_3.log"
+        bad_model_dir = session_dir / "claude_3"
+        bad_model_dir.mkdir()
+        bad_log = bad_model_dir / "test_run.log"
         bad_log.write_text("This is not a valid log file format")
         
         # 빈 로그 파일 생성
-        empty_log = session_dir / "deepeval_results_gemini_pro.log"
+        empty_model_dir = session_dir / "gemini_pro"
+        empty_model_dir.mkdir()
+        empty_log = empty_model_dir / "test_run.log"
         empty_log.write_text("")
         
         # 테스트 실행
@@ -622,7 +642,9 @@ Actual: Good actual
         session_dir.mkdir()
         
         # 로그 파일 생성 (실제 내용은 파서에 의해 처리됨)
-        log_file = session_dir / "deepeval_results_error_model.log"
+        error_model_dir = session_dir / "error_model"
+        error_model_dir.mkdir()
+        log_file = error_model_dir / "test_run.log"
         log_file.write_text("some log content")
         
         # 로그 파서가 예외를 던지도록 모킹
@@ -791,8 +813,10 @@ Actual: Good actual
             }
         }
         
-        # 각 모델의 로그 파일 생성
+        # 각 모델의 디렉토리 및 로그 파일 생성
         for model_name, model_data in model_logs.items():
+            model_dir = session_dir / model_name
+            model_dir.mkdir()
             log_content_parts = []
             for i, test_case in enumerate(model_data["test_cases"]):
                 log_content_parts.append(f"""==================================================
@@ -801,13 +825,13 @@ Input: Complex input data for {model_name} test {i+1}
 Expected: Expected comprehensive output {i+1}
 Actual: Generated output by {model_name} for test {i+1}
 
-✅ Correctness (score: {test_case["correctness"]}, reason: "Analysis quality assessment", error: None)
-✅ Clarity (score: {test_case["clarity"]}, reason: "Output clarity evaluation", error: None)
-✅ Actionability (score: {test_case["actionability"]}, reason: "Actionability assessment", error: None)
-✅ JSON Correctness (score: {test_case["json"]}, reason: "JSON format validation", error: None)
+✅ Correctness (score: {test_case["correctness"]}, reason: Analysis quality assessment, error: None)
+✅ Clarity (score: {test_case["clarity"]}, reason: Output clarity evaluation, error: None)
+✅ Actionability (score: {test_case["actionability"]}, reason: Actionability assessment, error: None)
+✅ JSON Correctness (score: {test_case["json"]}, reason: JSON format validation, error: None)
 ==================================================""")
             
-            log_file = session_dir / f"deepeval_results_{model_name}.log"
+            log_file = model_dir / "test_run.log"
             log_file.write_text("\n".join(log_content_parts))
         
         # 전체 분석 실행
@@ -871,13 +895,16 @@ Input: Performance input data {i+1}
 Expected: Performance expected output {i+1}
 Actual: Performance actual output {i+1}
 
-✅ Correctness (score: {0.7 + (i % 3) * 0.1}, reason: "Performance test {i+1}", error: None)
-✅ Clarity (score: {0.75 + (i % 4) * 0.05}, reason: "Clarity test {i+1}", error: None)
-✅ Actionability (score: {0.6 + (i % 5) * 0.08}, reason: "Actionability test {i+1}", error: None)
-✅ JSON Correctness (score: {0.9 + (i % 2) * 0.05}, reason: "JSON test {i+1}", error: None)
+✅ Correctness (score: {0.7 + (i % 3) * 0.1}, reason: Performance test {i+1}, error: None)
+✅ Clarity (score: {0.75 + (i % 4) * 0.05}, reason: Clarity test {i+1}, error: None)
+✅ Actionability (score: {0.6 + (i % 5) * 0.08}, reason: Actionability test {i+1}, error: None)
+✅ JSON Correctness (score: {0.9 + (i % 2) * 0.05}, reason: JSON test {i+1}, error: None)
 ==================================================""")
         
-        log_file = session_dir / "deepeval_results_performance_model.log"
+        # 성능 모델 디렉토리 생성
+        performance_model_dir = session_dir / "performance_model"
+        performance_model_dir.mkdir()
+        log_file = performance_model_dir / "test_run.log"
         log_file.write_text("\n".join(test_cases))
         
         # 성능 측정
@@ -1033,7 +1060,7 @@ Actual: Performance actual output {i+1}
         }
         
         # 테스트 실행
-        result = self.engine.analyze_session(str(session_dir), str(custom_output_dir))
+        result = self.engine.analyze_session(str(session_dir), output_dir=str(custom_output_dir))
         
         # 출력 디렉토리가 생성되었는지 확인
         self.assertTrue(custom_output_dir.exists())
