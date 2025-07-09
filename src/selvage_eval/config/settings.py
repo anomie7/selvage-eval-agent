@@ -96,6 +96,31 @@ class SelvageConfig(BaseModel):
         return v
 
 
+class DeepEvalConfig(BaseModel):
+    """DeepEval 설정"""
+    metrics: List[str] = Field(default_factory=list)
+    display_filter: str = "fail"
+    verbose: bool = False
+
+
+class SecurityConfig(BaseModel):
+    """보안 설정"""
+    allowed_paths: List[str] = Field(default_factory=list)
+    forbidden_commands: List[str] = Field(default_factory=list)
+
+
+class ResourceLimits(BaseModel):
+    """리소스 제한 설정"""
+    max_memory_mb: int = 2048
+    max_cpu_percent: int = 80
+    max_disk_gb: int = 10
+    max_execution_time: int = 3600
+
+
+class LoggingConfig(BaseModel):
+    """로깅 설정"""
+    level: str = "INFO"
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
 class EvaluationConfig(BaseModel):
@@ -108,6 +133,10 @@ class EvaluationConfig(BaseModel):
     commits_per_repo: int = 5
     workflow: WorkflowConfig
     selvage: SelvageConfig
+    deepeval: Optional[DeepEvalConfig] = None
+    security: Optional[SecurityConfig] = None
+    resource_limits: Optional[ResourceLimits] = None
+    logging: Optional[LoggingConfig] = None
     
     @model_validator(mode='after')
     def validate_config(self):
