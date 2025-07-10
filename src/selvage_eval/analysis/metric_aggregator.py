@@ -48,12 +48,8 @@ class MetricAggregator:
             }
         
         # 종합 점수 계산 (가중평균)
-        weights = {
-            'correctness': 0.3,
-            'clarity': 0.3, 
-            'actionability': 0.3,
-            'json_correctness': 0.1
-        }
+        from ..constants import METRIC_WEIGHTS
+        weights = METRIC_WEIGHTS
         
         overall_score = sum(
             aggregated[metric]['mean_score'] * weight 

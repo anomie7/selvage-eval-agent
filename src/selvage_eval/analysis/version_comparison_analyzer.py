@@ -395,12 +395,8 @@ class VersionComparisonAnalyzer:
             return {'direction': 'unknown', 'strength': 0.0}
         
         # 가중 평균 계산
-        weights = {
-            'correctness': 0.3,
-            'clarity': 0.3,
-            'actionability': 0.3,
-            'json_correctness': 0.1
-        }
+        from ..constants import METRIC_WEIGHTS
+        weights = METRIC_WEIGHTS
         
         weighted_slope = sum(
             trends[metric]['slope'] * weights.get(metric, 0.25)
