@@ -84,18 +84,11 @@ class FailurePatternAnalyzer:
                         categories[category] = categories.get(category, 0) + 1
                         confidences.append(confidence)
                     except Exception as e:
-                        logger.warning(f"Gemini 분류 실패: {e}")
-                        # fallback 분류
-                        category = self._fallback_categorize_failure(reason, metric)
-                        categories[category] = categories.get(category, 0) + 1
-                        confidences.append(0.5)  # 낮은 신뢰도
+                        logger.error(f"Gemini 분류 실패: {e}")
+                        raise
             else:
-                # Gemini가 없는 경우 fallback 분류만 사용
-                for case in metric_failures:
-                    reason = getattr(case, metric).reason
-                    category = self._fallback_categorize_failure(reason, metric)
-                    categories[category] = categories.get(category, 0) + 1
-                    confidences.append(0.5)  # 낮은 신뢰도
+                # Gemini가 없는 경우 예외 발생
+                raise RuntimeError("Gemini analyzer not available for failure categorization")
             
             patterns['by_metric'][metric] = {
                 'total_failures': len(metric_failures),
@@ -120,14 +113,10 @@ class FailurePatternAnalyzer:
                             all_categories[category] = all_categories.get(category, 0) + 1
                             all_confidences.append(confidence)
                         except Exception as e:
-                            logger.warning(f"Gemini 분류 실패: {e}")
-                            category = self._fallback_categorize_failure(reason, metric)
-                            all_categories[category] = all_categories.get(category, 0) + 1
-                            all_confidences.append(0.5)
+                            logger.error(f"Gemini 분류 실패: {e}")
+                            raise
                     else:
-                        category = self._fallback_categorize_failure(reason, metric)
-                        all_categories[category] = all_categories.get(category, 0) + 1
-                        all_confidences.append(0.5)
+                        raise RuntimeError("Gemini analyzer not available for failure categorization")
         
         patterns['by_category'] = all_categories
         patterns['confidence_scores']['overall'] = np.mean(all_confidences) if all_confidences else 0.0
@@ -136,61 +125,6 @@ class FailurePatternAnalyzer:
         patterns['critical_patterns'] = self._identify_critical_patterns(patterns)
         
         return patterns
-    
-    def _fallback_categorize_failure(self, reason: str, metric: str) -> str:
-        """Gemini 없이 기본 규칙 기반 분류
-        
-        Args:
-            reason: 실패 사유
-            metric: 메트릭 이름
-            
-        Returns:
-            str: 분류된 카테고리
-        """
-        reason_lower = reason.lower()
-        
-        # 메트릭별 기본 분류 규칙
-        if metric == 'correctness':
-            if any(keyword in reason_lower for keyword in ['missing', 'not identified', 'failed to identify']):
-                return 'missing_issues'
-            elif any(keyword in reason_lower for keyword in ['incorrect', 'wrong', 'inaccurate']):
-                return 'incorrect_analysis'
-            elif any(keyword in reason_lower for keyword in ['severity', 'importance', 'priority']):
-                return 'severity_misjudgment'
-            else:
-                return 'general_correctness_issue'
-        
-        elif metric == 'clarity':
-            if any(keyword in reason_lower for keyword in ['unclear', 'confusing', 'ambiguous']):
-                return 'unclear_explanation'
-            elif any(keyword in reason_lower for keyword in ['technical', 'jargon', 'complex']):
-                return 'technical_jargon'
-            elif any(keyword in reason_lower for keyword in ['structure', 'organization', 'format']):
-                return 'poor_structure'
-            else:
-                return 'general_clarity_issue'
-        
-        elif metric == 'actionability':
-            if any(keyword in reason_lower for keyword in ['vague', 'general', 'abstract']):
-                return 'vague_suggestions'
-            elif any(keyword in reason_lower for keyword in ['specific', 'concrete', 'detailed']):
-                return 'lack_of_specificity'
-            elif any(keyword in reason_lower for keyword in ['implement', 'execute', 'practical']):
-                return 'impractical_suggestions'
-            else:
-                return 'general_actionability_issue'
-        
-        elif metric == 'json_correctness':
-            if any(keyword in reason_lower for keyword in ['format', 'structure', 'syntax']):
-                return 'json_format_error'
-            elif any(keyword in reason_lower for keyword in ['schema', 'field', 'property']):
-                return 'schema_violation'
-            elif any(keyword in reason_lower for keyword in ['missing', 'required']):
-                return 'missing_fields'
-            else:
-                return 'general_json_issue'
-        
-        return 'unknown_failure'
     
     def _extract_worst_cases(self, failures: List[TestCaseResult], 
                            metric: str) -> List[Dict[str, Any]]:
