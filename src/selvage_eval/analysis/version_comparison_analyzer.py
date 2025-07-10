@@ -43,13 +43,13 @@ class VersionComparisonAnalyzer:
         """
         logger.info(f"버전 데이터 수집 시작 - 기본 경로: {base_path}")
         
-        base_path = Path(base_path)
-        if not base_path.exists():
-            logger.warning(f"Base path does not exist: {base_path}")
+        base_dir = Path(base_path)
+        if not base_dir.exists():
+            logger.warning(f"Base path does not exist: {base_dir}")
             return {}
         
-        version_data = {}
-        session_dirs = list(base_path.glob('*/'))
+        version_data: Dict[str, Any] = {}
+        session_dirs = list(base_dir.glob('*/'))
         logger.info(f"스캔할 세션 디렉토리 {len(session_dirs)}개 발견")
         
         # 모든 평가 세션 스캔
@@ -88,10 +88,13 @@ class VersionComparisonAnalyzer:
                 execution_date = self._extract_execution_date(metadata)
                 
                 if version not in version_data:
+                    sessions_list: List[Dict[str, Any]] = []
+                    dates_list: List[Optional[datetime]] = []
                     version_data[version] = {
                         'version': version,
-                        'sessions': [],
-                        'execution_dates': []
+                        'sessions': sessions_list,
+                        'execution_dates': dates_list,
+                        'latest_execution_date': None
                     }
                     logger.debug(f"새 버전 '{version}' 추가")
                 
@@ -393,9 +396,9 @@ class VersionComparisonAnalyzer:
         
         # 가중 평균 계산
         weights = {
-            'correctness': 0.4,
-            'clarity': 0.25,
-            'actionability': 0.25,
+            'correctness': 0.3,
+            'clarity': 0.3,
+            'actionability': 0.3,
             'json_correctness': 0.1
         }
         
@@ -524,7 +527,7 @@ class VersionComparisonAnalyzer:
             }
         
         # 심각도별 카운트
-        severity_counts = {}
+        severity_counts: Dict[str, int] = {}
         for regression in regressions:
             severity = regression['severity']
             severity_counts[severity] = severity_counts.get(severity, 0) + 1

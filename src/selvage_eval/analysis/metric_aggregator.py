@@ -27,7 +27,7 @@ class MetricAggregator:
             return self._empty_performance_data()
         
         metrics = ['correctness', 'clarity', 'actionability', 'json_correctness']
-        aggregated = {}
+        aggregated: Dict[str, Any] = {}
         
         for metric in metrics:
             scores = [getattr(result, metric).score for result in test_results]
@@ -49,9 +49,9 @@ class MetricAggregator:
         
         # 종합 점수 계산 (가중평균)
         weights = {
-            'correctness': 0.4,
-            'clarity': 0.25, 
-            'actionability': 0.25,
+            'correctness': 0.3,
+            'clarity': 0.3, 
+            'actionability': 0.3,
             'json_correctness': 0.1
         }
         
@@ -79,7 +79,7 @@ class MetricAggregator:
     def _empty_performance_data(self) -> Dict[str, Any]:
         """빈 성능 데이터 반환"""
         metrics = ['correctness', 'clarity', 'actionability', 'json_correctness']
-        aggregated = {}
+        aggregated: Dict[str, Any] = {}
         
         for metric in metrics:
             aggregated[metric] = {
@@ -177,7 +177,7 @@ class MetricAggregator:
             return {}
         
         metrics = ['correctness', 'clarity', 'actionability', 'json_correctness']
-        outliers = {}
+        outliers: Dict[str, List[Dict[str, Any]]] = {}
         
         for metric in metrics:
             scores = [getattr(result, metric).score for result in test_results]
@@ -220,7 +220,7 @@ class MetricAggregator:
         
         return outliers
     
-    def calculate_consistency_metrics(self, test_results: List[TestCaseResult]) -> Dict[str, float]:
+    def calculate_consistency_metrics(self, test_results: List[TestCaseResult]) -> Dict[str, Any]:
         """일관성 메트릭 계산
         
         Args:
