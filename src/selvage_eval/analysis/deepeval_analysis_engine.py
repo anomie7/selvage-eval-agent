@@ -592,11 +592,11 @@ class DeepEvalAnalysisEngine:
                             )
                     
                     # 주요 실패 이유 (번역된 것)
-                    top_reasons = failure_data.get('top_failure_reasons', [])
+                    top_reasons = failure_data.get('failure_reasons', [])
                     if top_reasons:
                         lines.extend([
                             "",
-                            "**주요 실패 이유:**",
+                            "**실패 이유:**",
                             ""
                         ])
                         
@@ -946,7 +946,6 @@ class DeepEvalAnalysisEngine:
                 'failure_rate': failure_count / len(test_results) if test_results else 0,
                 'failed_metrics': metric_summary,
                 'failure_reasons': translated_reasons,
-                'top_failure_reasons': translated_reasons[:5]  # 상위 5개만 표시
             }
         
         return model_failures
