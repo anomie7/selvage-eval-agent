@@ -1,216 +1,41 @@
 """실패 패턴 분석기
 
-GeminiFailureAnalyzer를 사용하여 실패 패턴을 통합 분석합니다.
+실패한 테스트 케이스의 개수를 집계합니다.
 """
 
-import numpy as np
 from typing import List, Dict, Any
 import logging
 
 from .deepeval_log_parser import TestCaseResult
-from .gemini_failure_analyzer import GeminiFailureAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 class FailurePatternAnalyzer:
-    """실패 패턴 분석기 (통합 인터페이스)"""
+    """실패 패턴 분석기 (단순 집계)"""
     
     def __init__(self):
-        try:
-            self.gemini_analyzer = GeminiFailureAnalyzer()
-        except RuntimeError as e:
-            logger.warning(f"GeminiFailureAnalyzer 초기화 실패: {e}")
-            self.gemini_analyzer = None
+        pass
     
     def analyze_failure_patterns(self, 
                                failed_cases: List[TestCaseResult]) -> Dict[str, Any]:
-        """실패 패턴 종합 분석
+        """실패 패턴 단순 집계
         
         Args:
             failed_cases: 실패한 테스트 케이스 결과 리스트
             
         Returns:
-            Dict: 실패 패턴 분석 결과
+            Dict: 실패 패턴 분석 결과 (total_failures만 포함)
         """
         logger.info(f"실패 패턴 분석 시작 - {len(failed_cases)}개 실패 케이스 분석")
         
-        if not failed_cases:
-            logger.info("분석할 실패 케이스가 없음")
-            return {
-                'total_failures': 0,
-                'by_metric': {},
-                'by_category': {},
-                'critical_patterns': [],
-                'confidence_scores': {},
-                'gemini_available': self.gemini_analyzer is not None
-            }
+        total_failures = len(failed_cases)
         
-        patterns = {
-            'total_failures': len(failed_cases),
-            'by_metric': {},
-            'by_category': {},
-            'critical_patterns': [],
-            'confidence_scores': {},
-            'gemini_available': self.gemini_analyzer is not None
+        logger.info(f"총 실패 케이스: {total_failures}개")
+        
+        return {
+            'total_failures': total_failures
         }
-        
-        # 메트릭별 실패 분석
-        for metric in ['correctness', 'clarity', 'actionability', 'json_correctness']:
-            metric_failures = [
-                case for case in failed_cases 
-                if not getattr(case, metric).passed
-            ]
-            
-            if not metric_failures:
-                patterns['by_metric'][metric] = {
-                    'total_failures': 0,
-                    'failure_rate': 0.0,
-                    'categories': {},
-                    'worst_cases': [],
-                    'avg_confidence': 0.0
-                }
-                continue
-            
-            categories = {}
-            confidences = []
-            
-            # Gemini 분석이 가능한 경우
-            if self.gemini_analyzer:
-                for case in metric_failures:
-                    reason = getattr(case, metric).reason
-                    try:
-                        category, confidence = self.gemini_analyzer.categorize_failure(reason, metric)
-                        categories[category] = categories.get(category, 0) + 1
-                        confidences.append(confidence)
-                    except Exception as e:
-                        logger.error(f"Gemini 분류 실패: {e}")
-                        raise
-            else:
-                # Gemini가 없는 경우 예외 발생
-                raise RuntimeError("Gemini analyzer not available for failure categorization")
-            
-            patterns['by_metric'][metric] = {
-                'total_failures': len(metric_failures),
-                'failure_rate': len(metric_failures) / len(failed_cases) if failed_cases else 0,
-                'categories': categories,
-                'worst_cases': self._extract_worst_cases(metric_failures, metric),
-                'avg_confidence': np.mean(confidences) if confidences else 0.0
-            }
-        
-        # 전체 카테고리별 분석
-        all_categories = {}
-        all_confidences = []
-        
-        for case in failed_cases:
-            for metric in ['correctness', 'clarity', 'actionability', 'json_correctness']:
-                if not getattr(case, metric).passed:
-                    reason = getattr(case, metric).reason
-                    
-                    if self.gemini_analyzer:
-                        try:
-                            category, confidence = self.gemini_analyzer.categorize_failure(reason, metric)
-                            all_categories[category] = all_categories.get(category, 0) + 1
-                            all_confidences.append(confidence)
-                        except Exception as e:
-                            logger.error(f"Gemini 분류 실패: {e}")
-                            raise
-                    else:
-                        raise RuntimeError("Gemini analyzer not available for failure categorization")
-        
-        patterns['by_category'] = all_categories
-        patterns['confidence_scores']['overall'] = np.mean(all_confidences) if all_confidences else 0.0
-        
-        # 중요한 패턴 식별
-        patterns['critical_patterns'] = self._identify_critical_patterns(patterns)
-        
-        return patterns
-    
-    def _extract_worst_cases(self, failures: List[TestCaseResult], 
-                           metric: str) -> List[Dict[str, Any]]:
-        """가장 낮은 점수의 실패 케이스 추출
-        
-        Args:
-            failures: 실패 케이스 리스트
-            metric: 메트릭 이름
-            
-        Returns:
-            List: 최악 케이스들
-        """
-        metric_scores = [(case, getattr(case, metric).score) for case in failures]
-        worst_cases = sorted(metric_scores, key=lambda x: x[1])[:5]
-        
-        return [
-            {
-                'score': score,
-                'reason': getattr(case, metric).reason,
-                'input_preview': case.input_data[:200] + '...' if len(case.input_data) > 200 else case.input_data
-            }
-            for case, score in worst_cases
-        ]
-    
-    def _identify_critical_patterns(self, patterns: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """중요한 패턴 식별
-        
-        Args:
-            patterns: 분석된 패턴 데이터
-            
-        Returns:
-            List: 중요한 패턴들
-        """
-        critical_patterns = []
-        
-        # 전체 카테고리별 빈도 분석
-        by_category = patterns.get('by_category', {})
-        total_failures = patterns.get('total_failures', 0)
-        
-        if total_failures == 0:
-            return critical_patterns
-        
-        # 빈도가 높은 카테고리 식별 (전체 실패의 20% 이상)
-        high_frequency_threshold = max(3, total_failures * 0.2)
-        
-        for category, count in by_category.items():
-            if count >= high_frequency_threshold:
-                critical_patterns.append({
-                    'category': category,
-                    'count': count,
-                    'percentage': (count / total_failures) * 100,
-                    'severity': 'high',
-                    'reason': f"전체 실패의 {(count / total_failures) * 100:.1f}%를 차지하는 주요 패턴"
-                })
-        
-        # 메트릭별 심각한 패턴 식별
-        by_metric = patterns.get('by_metric', {})
-        for metric, metric_data in by_metric.items():
-            metric_failures = metric_data.get('total_failures', 0)
-            if metric_failures >= 5:  # 최소 5개 이상의 실패가 있는 메트릭
-                critical_patterns.append({
-                    'category': f"{metric}_high_failure_rate",
-                    'count': metric_failures,
-                    'percentage': (metric_failures / total_failures) * 100,
-                    'severity': 'medium',
-                    'reason': f"{metric} 메트릭에서 {metric_failures}개의 실패 발생"
-                })
-        
-        # 신뢰도가 낮은 분류 식별
-        confidence_scores = patterns.get('confidence_scores', {})
-        overall_confidence = confidence_scores.get('overall', 1.0)
-        
-        if overall_confidence < 0.7:
-            critical_patterns.append({
-                'category': 'low_classification_confidence',
-                'count': total_failures,
-                'percentage': 100.0,
-                'severity': 'low',
-                'reason': f"분류 신뢰도가 낮음 (평균: {overall_confidence:.2f})"
-            })
-        
-        # 심각도 순으로 정렬
-        severity_order = {'high': 0, 'medium': 1, 'low': 2}
-        critical_patterns.sort(key=lambda x: (severity_order[x['severity']], -x['count']))
-        
-        return critical_patterns
     
     def get_failure_summary(self, patterns: Dict[str, Any]) -> Dict[str, Any]:
         """실패 패턴 요약 정보 생성
@@ -221,34 +46,6 @@ class FailurePatternAnalyzer:
         Returns:
             Dict: 요약 정보
         """
-        summary = {
-            'total_failures': patterns.get('total_failures', 0),
-            'top_categories': [],
-            'most_problematic_metric': None,
-            'critical_patterns_count': len(patterns.get('critical_patterns', [])),
-            'gemini_available': patterns.get('gemini_available', False)
+        return {
+            'total_failures': patterns.get('total_failures', 0)
         }
-        
-        # 상위 카테고리 추출
-        by_category = patterns.get('by_category', {})
-        if by_category:
-            sorted_categories = sorted(by_category.items(), key=lambda x: x[1], reverse=True)
-            summary['top_categories'] = [
-                {'category': category, 'count': count}
-                for category, count in sorted_categories[:5]
-            ]
-        
-        # 가장 문제가 많은 메트릭 식별
-        by_metric = patterns.get('by_metric', {})
-        if by_metric:
-            most_problematic = max(
-                by_metric.items(),
-                key=lambda x: x[1].get('total_failures', 0)
-            )
-            summary['most_problematic_metric'] = {
-                'metric': most_problematic[0],
-                'failures': most_problematic[1].get('total_failures', 0),
-                'failure_rate': most_problematic[1].get('failure_rate', 0.0)
-            }
-        
-        return summary
