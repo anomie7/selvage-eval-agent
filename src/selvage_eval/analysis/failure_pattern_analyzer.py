@@ -33,7 +33,10 @@ class FailurePatternAnalyzer:
         Returns:
             Dict: 실패 패턴 분석 결과
         """
+        logger.info(f"실패 패턴 분석 시작 - {len(failed_cases)}개 실패 케이스 분석")
+        
         if not failed_cases:
+            logger.info("분석할 실패 케이스가 없음")
             return {
                 'total_failures': 0,
                 'by_metric': {},

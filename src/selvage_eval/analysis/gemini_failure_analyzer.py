@@ -7,6 +7,9 @@ import json
 import os
 from typing import Tuple, Optional
 import logging
+from pydantic import BaseModel, Field
+
+from selvage_eval.llm.gemini_client import GeminiClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,74 +28,23 @@ class GeminiFailureAnalyzer:
                 "GEMINI_API_KEY 환경 변수를 확인하고 API 키가 유효한지 확인해주세요."
             )
         
-    def _initialize_gemini_client(self):
-        """Gemini 클라이언트 초기화 (structured output 지원)"""
+    def _initialize_gemini_client(self) -> GeminiClient:
+        """Gemini 클라이언트 초기화"""
         try:
-            import google.generativeai as genai
-            
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 logger.error("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-                return None
+                raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
                 
-            genai.configure(api_key=api_key)
-            
-            # structured output을 위한 생성 설정
-            generation_config = {
-                "response_mime_type": "application/json",
-                "response_schema": {
-                    "type": "object",
-                    "properties": {
-                        "category": {
-                            "type": "string",
-                            "description": "실패 사유를 분류한 카테고리명 (영어 스네이크케이스)"
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "minimum": 0.0,
-                            "maximum": 1.0,
-                            "description": "분류 신뢰도 (0.0-1.0)"
-                        },
-                        "explanation": {
-                            "type": "string",
-                            "description": "카테고리 선택 이유 및 Selvage 개선 방향"
-                        }
-                    },
-                    "required": ["category", "confidence", "explanation"]
-                }
-            }
-            
-            model = genai.GenerativeModel(
-                'gemini-2.0-flash-exp',
-                generation_config=generation_config
-            )
-            
-            # structured output 테스트
-            test_prompt = """
-테스트용 실패 사유: "The review output format is incorrect"
-위 실패 사유를 JSON 형식으로 분류해주세요.
-            """
-            
-            test_response = model.generate_content(test_prompt)
-            
-            if not test_response or not test_response.text:
-                logger.error("Gemini structured output 테스트 실패")
-                return None
-                
-            # JSON 파싱 테스트
-            try:
-                json.loads(test_response.text)
-                logger.info("Gemini 클라이언트 초기화 성공 (structured output 지원)")
-            except json.JSONDecodeError:
-                logger.warning("structured output 테스트에서 JSON 파싱 실패, 계속 진행")
-                
-            return model
+            client = GeminiClient(api_key=api_key, model_name="gemini-2.5-flash")
+            logger.info("Gemini 클라이언트 초기화 성공")
+            return client
             
         except Exception as e:
             logger.error(f"Gemini 클라이언트 초기화 실패: {e}")
-            return None
+            raise RuntimeError(f"Gemini 클라이언트 초기화 실패: {e}")
     
-    def categorize_failure(self, reason: str, failed_metric: str = None) -> Tuple[str, float]:
+    def categorize_failure(self, reason: str, failed_metric: Optional[str] = None) -> Tuple[str, float]:
         """실패 사유를 자유 형식 카테고리로 분류 (신뢰도 점수 포함)
         
         Args:
@@ -102,22 +54,35 @@ class GeminiFailureAnalyzer:
         Returns:
             Tuple[str, float]: (카테고리명, 신뢰도 점수)
         """
+        logger.debug(f"실패 사유 분류 시작 - 메트릭: {failed_metric or 'unknown'}, 사유: {reason[:100]}...")
+        
         # 캐시 키에 failed_metric 포함
         cache_key = hash(f"{reason}:{failed_metric or 'unknown'}")
         if cache_key in self.cache:
+            logger.debug("캐시에서 분류 결과 반환")
             return self.cache[cache_key]
         
         # Gemini 분류 실행 (필수)
         try:
+            logger.info(f"Gemini 실패 분류 시작 - 메트릭: {failed_metric or 'unknown'}")
+            import time
+            start_time = time.time()
+            
             category, confidence = self._gemini_categorize_failure(reason, failed_metric)
+            
+            classification_time = time.time() - start_time
+            logger.info(f"Gemini 실패 분류 완료 - 카테고리: '{category}', 신뢰도: {confidence:.3f} (소요시간: {classification_time:.2f}초)")
+            
             self.cache[cache_key] = (category, confidence)
+            logger.debug(f"분류 결과 캐시에 저장 - 캐시 크기: {len(self.cache)}")
+            
             return category, confidence
         except Exception as e:
             error_msg = f"Gemini 분류 실패 - 메트릭: {failed_metric or 'unknown'}, 실패 사유: '{reason[:100]}{'...' if len(reason) > 100 else ''}', 오류: {e}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
     
-    def _gemini_categorize_failure(self, reason: str, failed_metric: str = None) -> Tuple[str, float]:
+    def _gemini_categorize_failure(self, reason: str, failed_metric: Optional[str] = None) -> Tuple[str, float]:
         """Gemini를 사용한 실패 사유 분류"""
         # 메트릭별 전문 컨텍스트 설명
         metric_contexts = {
@@ -208,8 +173,28 @@ JSON 형식으로 다음 스키마를 따라 응답해주세요:
 ```
 """
         
-        response = self.gemini_client.generate_content(prompt)
-        return self._parse_gemini_response(response.text)
+        # JSON 스키마 정의
+        class FailureAnalysisResponse(BaseModel):
+            category: str = Field(description="실패 사유를 분류한 카테고리명 (영어 스네이크케이스)")
+            confidence: float = Field(description="분류 신뢰도 (0.0-1.0)", ge=0.0, le=1.0)
+            explanation: str = Field(description="카테고리 선택 이유 및 Selvage 개선 방향")
+        
+        messages = [{"role": "user", "content": prompt}]
+        
+        logger.debug(f"Gemini API 호출 시작 - 프롬프트 길이: {len(prompt)} 문자")
+        import time
+        api_start_time = time.time()
+        
+        response = self.gemini_client.query(
+            messages=messages,
+            system_instruction="실패 사유를 분석하여 JSON 형식으로 반환해주세요.",
+            response_schema=FailureAnalysisResponse
+        )
+        
+        api_time = time.time() - api_start_time
+        logger.debug(f"Gemini API 호출 완료 (소요시간: {api_time:.2f}초)")
+        
+        return self._parse_gemini_response(response)
     
     def _parse_gemini_response(self, response_text: str) -> Tuple[str, float]:
         """Gemini structured output 응답 파싱"""

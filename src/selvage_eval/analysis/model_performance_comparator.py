@@ -35,7 +35,10 @@ class ModelPerformanceComparator:
         Returns:
             Dict: 모델 통계, 비교 표, 순위, 통계 분석, 권장사항을 포함한 종합 결과
         """
+        logger.info(f"모델 성능 비교 분석 시작 - {len(model_results)}개 모델 비교")
+        
         if not model_results:
+            logger.info("비교할 모델이 없음")
             return {
                 'model_count': 0,
                 'model_statistics': {},
@@ -46,8 +49,10 @@ class ModelPerformanceComparator:
             }
         
         # 모델별 기본 통계 계산
+        logger.info("모델별 기본 통계 계산 중...")
         model_statistics = {}
-        for model_name, results in model_results.items():
+        for model_idx, (model_name, results) in enumerate(model_results.items(), 1):
+            logger.debug(f"모델 {model_idx}/{len(model_results)} '{model_name}' 통계 계산 중 ({len(results)}개 테스트 케이스)...")
             if results:
                 model_statistics[model_name] = self.aggregator.aggregate_model_performance(results)
             else:

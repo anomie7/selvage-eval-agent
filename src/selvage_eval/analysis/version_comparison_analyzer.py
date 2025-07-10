@@ -41,15 +41,20 @@ class VersionComparisonAnalyzer:
         Returns:
             Dict: 버전별 수집된 데이터
         """
+        logger.info(f"버전 데이터 수집 시작 - 기본 경로: {base_path}")
+        
         base_path = Path(base_path)
         if not base_path.exists():
             logger.warning(f"Base path does not exist: {base_path}")
             return {}
         
         version_data = {}
+        session_dirs = list(base_path.glob('*/'))
+        logger.info(f"스캔할 세션 디렉토리 {len(session_dirs)}개 발견")
         
         # 모든 평가 세션 스캔
-        for session_dir in base_path.glob('*/'):
+        for session_idx, session_dir in enumerate(session_dirs, 1):
+            logger.debug(f"세션 {session_idx}/{len(session_dirs)} 처리 중: {session_dir.name}")
             if not session_dir.is_dir():
                 continue
             
@@ -69,11 +74,15 @@ class VersionComparisonAnalyzer:
                     logger.debug(f"No version info in {session_dir}")
                     continue
                 
+                logger.debug(f"세션 '{session_dir.name}'에서 버전 '{version}' 감지")
+                
                 # 세션 결과 수집
                 session_results = self._collect_session_results(session_dir)
                 if not session_results:
                     logger.debug(f"No results in {session_dir}")
                     continue
+                
+                logger.debug(f"세션 '{session_dir.name}'에서 {len(session_results)}개 테스트 케이스 수집")
                 
                 # 실행 날짜 추출
                 execution_date = self._extract_execution_date(metadata)
@@ -84,6 +93,7 @@ class VersionComparisonAnalyzer:
                         'sessions': [],
                         'execution_dates': []
                     }
+                    logger.debug(f"새 버전 '{version}' 추가")
                 
                 version_data[version]['sessions'].append({
                     'session_dir': str(session_dir),
@@ -103,8 +113,13 @@ class VersionComparisonAnalyzer:
             if dates:
                 # 가장 최근 실행 날짜 사용
                 data['latest_execution_date'] = max(dates)
+                logger.debug(f"버전 '{version}' 최신 실행 날짜: {data['latest_execution_date']}")
             else:
                 data['latest_execution_date'] = None
+                logger.debug(f"버전 '{version}' 실행 날짜 정보 없음")
+        
+        total_sessions = sum(len(data['sessions']) for data in version_data.values())
+        logger.info(f"버전 데이터 수집 완료 - {len(version_data)}개 버전, 총 {total_sessions}개 세션")
         
         return version_data
     
@@ -203,7 +218,10 @@ class VersionComparisonAnalyzer:
         Returns:
             Dict: 버전 발전 분석 결과
         """
+        logger.info(f"버전 발전 분석 시작 - {len(version_data)}개 버전 분석")
+        
         if not version_data:
+            logger.info("분석할 버전 데이터가 없음")
             return {
                 'version_timeline': [],
                 'performance_trends': {},
@@ -213,13 +231,17 @@ class VersionComparisonAnalyzer:
             }
         
         # 버전별 종합 성능 계산
+        logger.info("버전별 종합 성능 계산 중...")
         version_performance = {}
-        for version, data in version_data.items():
+        for version_idx, (version, data) in enumerate(version_data.items(), 1):
+            logger.debug(f"버전 {version_idx}/{len(version_data)} '{version}' 성능 계산 중...")
+            
             all_results = []
             for session in data['sessions']:
                 all_results.extend(session['results'])
             
             if all_results:
+                logger.debug(f"버전 '{version}' - {len(all_results)}개 테스트 케이스로 성능 계산")
                 performance = self.aggregator.aggregate_model_performance(all_results)
                 version_performance[version] = {
                     'version': version,
@@ -227,20 +249,31 @@ class VersionComparisonAnalyzer:
                     'latest_execution_date': data['latest_execution_date'],
                     'total_test_cases': len(all_results)
                 }
+                
+                overall_score = performance.get('overall', {}).get('weighted_score', 0.0)
+                logger.debug(f"버전 '{version}' 성능 계산 완료 - 전체 점수: {overall_score:.3f}")
+            else:
+                logger.warning(f"버전 '{version}'에 유효한 테스트 케이스가 없음")
         
         # 시간순 정렬
+        logger.info("버전을 시간순으로 정렬 중...")
         sorted_versions = self._sort_versions_by_date(version_performance)
+        logger.info(f"시간순 정렬 완료 - {len(sorted_versions)}개 버전")
         
         # 성능 트렌드 분석
+        logger.info("성능 트렌드 분석 중...")
         performance_trends = self._analyze_performance_trends(sorted_versions)
         
         # 회귀 분석
+        logger.info("성능 회귀 분석 중...")
         regression_analysis = self._detect_regressions(sorted_versions)
         
         # 개선 사항 식별
+        logger.info("성능 개선사항 식별 중...")
         improvement_highlights = self._identify_improvements(sorted_versions)
         
         # 버전 권장사항 생성
+        logger.info("버전 권장사항 생성 중...")
         version_recommendations = self._generate_version_recommendations(
             sorted_versions, {
                 'performance_trends': performance_trends,
@@ -248,6 +281,8 @@ class VersionComparisonAnalyzer:
                 'improvement_highlights': improvement_highlights
             }
         )
+        
+        logger.info(f"버전 발전 분석 완료 - {len(improvement_highlights)}개 개선사항, {regression_analysis.get('total_regressions', 0)}개 회귀 발견")
         
         return {
             'version_timeline': sorted_versions,

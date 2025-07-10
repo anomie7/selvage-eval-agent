@@ -37,7 +37,10 @@ class TechStackAnalyzer:
         Returns:
             Dict: 기술스택별 분석 결과
         """
+        logger.info(f"기술스택 성능 분석 시작 - {len(repo_results)}개 저장소 분석")
+        
         if not repo_results:
+            logger.info("분석할 저장소 데이터가 없음")
             return {
                 'by_tech_stack': {},
                 'cross_stack_comparison': {},
@@ -47,28 +50,36 @@ class TechStackAnalyzer:
         # 기술스택별 성능 분석
         tech_stack_analysis = {}
         
-        for repository, model_results in repo_results.items():
+        for repo_idx, (repository, model_results) in enumerate(repo_results.items(), 1):
+            logger.info(f"저장소 {repo_idx}/{len(repo_results)} '{repository}' 분석 중...")
             # 저장소명을 기술스택으로 매핑
             tech_stack = self.tech_stack_mapping.get(repository, repository)
+            logger.debug(f"저장소 '{repository}' -> 기술스택 '{tech_stack}' 매핑")
             
             if not model_results:
+                logger.warning(f"저장소 '{repository}'에 모델 결과가 없음")
                 continue
             
             # 모델별 성능 계산
+            logger.debug(f"기술스택 '{tech_stack}' - {len(model_results)}개 모델 성능 계산 중...")
             model_performance = {}
             for model_name, test_results in model_results.items():
+                logger.debug(f"모델 '{model_name}' 성능 계산 중 ({len(test_results)}개 테스트 케이스)...")
                 if test_results:
                     model_performance[model_name] = self.aggregator.aggregate_model_performance(test_results)
                 else:
                     model_performance[model_name] = self.aggregator.aggregate_model_performance([])
             
             # 최고 성능 모델 식별
+            logger.debug(f"기술스택 '{tech_stack}' 최고 성능 모델 식별 중...")
             best_model = self._find_best_model(model_performance)
             
             # 성능 격차 계산
+            logger.debug(f"기술스택 '{tech_stack}' 성능 격차 계산 중...")
             performance_gap = self._calculate_performance_gap(model_performance)
             
             # 기술스택별 권장사항 생성
+            logger.debug(f"기술스택 '{tech_stack}' 권장사항 생성 중...")
             recommendations = self._generate_tech_stack_recommendations(tech_stack, {
                 'model_performance': model_performance,
                 'best_model': best_model,
@@ -83,12 +94,21 @@ class TechStackAnalyzer:
                 'recommendations': recommendations,
                 'model_count': len(model_performance)
             }
+            
+            if best_model and best_model['name']:
+                logger.info(f"저장소 '{repository}' ({tech_stack}) 분석 완료 - 최고 모델: {best_model['name']} (점수: {best_model['score']:.3f})")
+            else:
+                logger.info(f"저장소 '{repository}' ({tech_stack}) 분석 완료 - 유효한 모델 없음")
         
         # 기술스택 간 교차 비교
+        logger.info("기술스택 간 교차 비교 분석 중...")
         cross_stack_comparison = self._cross_stack_comparison(tech_stack_analysis)
         
         # 전체 권장사항 생성
+        logger.info("전체 권장사항 생성 중...")
         overall_recommendations = self._generate_overall_recommendations(tech_stack_analysis, cross_stack_comparison)
+        
+        logger.info(f"기술스택 성능 분석 완료 - {len(tech_stack_analysis)}개 기술스택 분석됨")
         
         return {
             'by_tech_stack': tech_stack_analysis,
