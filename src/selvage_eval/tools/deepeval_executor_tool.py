@@ -235,7 +235,8 @@ class DeepEvalExecutorTool(Tool):
             # DisplayConfig 설정
             display_config = DisplayConfig(
                 display_option=self._convert_display_filter_to_enum(display_filter, TestRunResultDisplay),
-                file_output_dir=str(output_path)
+                file_output_dir=str(output_path),
+                verbose_mode=True,
             )
             
             # AsyncConfig 설정
@@ -272,7 +273,7 @@ class DeepEvalExecutorTool(Tool):
             # DeepEval을 가져올 수 없는 경우 빈 리스트 반환
             return []
         
-        model = "gemini-2.0-flash-exp"
+        model = "gemini-2.5-pro"
         
         # Correctness GEval - 코드 리뷰 정확성 평가
         correctness = GEval(
