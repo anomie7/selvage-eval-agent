@@ -591,17 +591,42 @@ class DeepEvalAnalysisEngine:
                                 f"(평균 신뢰도: {metric_data['avg_confidence']:.3f})"
                             )
                     
-                    # 주요 실패 이유 (번역된 것)
-                    top_reasons = failure_data.get('failure_reasons', [])
-                    if top_reasons:
+                    # 메트릭별 번역된 실패 이유
+                    failed_metrics = failure_data.get('failed_metrics', {})
+                    if failed_metrics:
                         lines.extend([
                             "",
-                            "**실패 이유:**",
+                            "**메트릭별 실패 이유:**",
                             ""
                         ])
                         
-                        for i, reason in enumerate(top_reasons, 1):
-                            lines.append(f"{i}. {reason}")
+                        for metric_name, metric_data in failed_metrics.items():
+                            metric_display = {
+                                'correctness': '정확성',
+                                'clarity': '명확성', 
+                                'actionability': '실행가능성',
+                                'json_correctness': 'JSON 정확성'
+                            }.get(metric_name, metric_name)
+                            
+                            translated_reasons = metric_data.get('translated_reasons', [])
+                            if translated_reasons:
+                                lines.append(f"**{metric_display}:**")
+                                for reason in translated_reasons:
+                                    lines.append(f"- {reason}")
+                                lines.append("")
+                    
+                    ai_analysis = failure_data['ai_analyzed_failure_summary']
+                    if ai_analysis:
+                        lines.extend([
+                            "",
+                            "## 🤖 AI 기반 실패 사유 분석",
+                            "",
+                            f"**분석 대상**: {', '.join(ai_analysis['analyzed_metrics'])} 메트릭",
+                            f"**총 분석 실패 건수**: {ai_analysis['total_failures_analyzed']}건", 
+                            "",
+                            ai_analysis['analysis_content'],
+                            ""
+                        ])
                     
                     lines.append("")
             
@@ -675,16 +700,16 @@ class DeepEvalAnalysisEngine:
         for rec in all_recommendations:
             lines.append(f"1. {rec}")
         
-        lines.extend([
-            "",
-            "### 다음 단계",
-            "",
-            "- 성능이 낮은 메트릭에 대한 모델 개선",
-            "- 실패 패턴이 많은 영역의 프롬프트 최적화",
-            "- 최고 성능 모델의 특성을 다른 모델에 적용",
-            "- 정기적인 성능 모니터링 및 추적",
-            ""
-        ])
+        # AI 기반 종합 실패 분석
+        ai_summary = self._generate_ai_failure_summary(model_failure_analysis)
+        if ai_summary:
+            lines.extend([
+                "",
+                "### AI 기반 종합 실패 분석",
+                "",
+                ai_summary,
+                ""
+            ])
         
         return "\n".join(lines)
     
@@ -782,14 +807,19 @@ class DeepEvalAnalysisEngine:
             if not api_key:
                 logger.warning("GEMINI_API_KEY가 설정되지 않았습니다. 실패 이유 번역이 비활성화됩니다.")
                 self.gemini_client = None
+                self.gemini_pro_client = None
                 return
             
+            # 번역용 Flash 클라이언트
             self.gemini_client = GeminiClient(api_key=api_key, model_name="gemini-2.5-flash")
-            logger.info("Gemini 클라이언트 초기화 완료")
+            # AI 분석용 Pro 클라이언트
+            self.gemini_pro_client = GeminiClient(api_key=api_key, model_name="gemini-2.5-pro")
+            logger.info("Gemini 클라이언트 초기화 완료 (Flash + Pro)")
             
         except Exception as e:
             logger.error(f"Gemini 클라이언트 초기화 실패: {e}")
             self.gemini_client = None
+            self.gemini_pro_client = None
     
     def _translate_failure_reason_with_gemini(self, failure_reason: str) -> str:
         """Gemini를 사용하여 실패 이유를 한글로 번역
@@ -831,7 +861,7 @@ class DeepEvalAnalysisEngine:
             return failure_reason
     
     def _batch_translate_failure_reasons(self, failure_reasons: List[str]) -> List[str]:
-        """여러 실패 이유를 배치로 번역
+        """여러 실패 이유를 병렬 처리로 번역 (진정한 배치 처리)
         
         Args:
             failure_reasons: 영어 실패 이유 목록
@@ -839,30 +869,176 @@ class DeepEvalAnalysisEngine:
         Returns:
             한글 번역된 실패 이유 목록
         """
-        if not self.gemini_client:
+        if not self.gemini_client or not failure_reasons:
             return failure_reasons
         
-        translated_reasons = []
+        logger.info(f"실패 이유 {len(failure_reasons)}개 병렬 번역 시작")
         
-        # 배치 크기 제한 (API 한도 고려)
-        batch_size = 10
+        # 배치 요청 데이터 준비
+        batch_requests = []
+        system_instruction = "다음 DeepEval 테스트 실패 이유를 한국어로 번역해주세요. 번역된 결과만 반환해주세요."
         
-        for i in range(0, len(failure_reasons), batch_size):
-            batch = failure_reasons[i:i + batch_size]
-            batch_translated = []
-            
-            for reason in batch:
-                translated = self._translate_failure_reason_with_gemini(reason)
-                batch_translated.append(translated)
-            
-            translated_reasons.extend(batch_translated)
-            
-            # API 호출 간격 조절
-            if len(failure_reasons) > batch_size:
-                import time
-                time.sleep(0.5)
+        for reason in failure_reasons:
+            request = {
+                'messages': [{
+                    "role": "user", 
+                    "content": f"원문: {reason}\n\n번역:"
+                }]
+            }
+            batch_requests.append(request)
         
-        return translated_reasons
+        try:
+            # 병렬 처리를 통한 배치 번역
+            results = self.gemini_client.batch_query(
+                batch_requests=batch_requests,
+                system_instruction=system_instruction,
+                max_workers=5  # 동시 처리 제한
+            )
+            
+            # 결과 처리
+            translated_reasons = []
+            for i, result in enumerate(results):
+                if result and isinstance(result, str):
+                    translated = result.strip()
+                    if translated and len(translated) > 0:
+                        translated_reasons.append(translated)
+                    else:
+                        logger.warning(f"번역 결과가 비어있습니다. 원본 반환: {failure_reasons[i]}")
+                        translated_reasons.append(failure_reasons[i])
+                else:
+                    logger.warning(f"번역 실패. 원본 반환: {failure_reasons[i]}")
+                    translated_reasons.append(failure_reasons[i])
+            
+            logger.info(f"병렬 번역 완료: {len([r for r, orig in zip(translated_reasons, failure_reasons) if r != orig])}/{len(failure_reasons)} 성공")
+            return translated_reasons
+            
+        except Exception as e:
+            logger.error(f"배치 번역 실패: {e}, 개별 번역으로 fallback")
+            # fallback: 기존 개별 번역 방식
+            return [self._translate_failure_reason_with_gemini(reason) for reason in failure_reasons]
+    
+    def _analyze_metric_failures_with_ai(self, failed_metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """AI를 활용하여 메트릭별 실패 이유를 요약, 분류, 분석
+        
+        Args:
+            failed_metrics: 메트릭별 실패 데이터
+            
+        Returns:
+            AI 분석 결과 또는 None (분석 실패 시)
+        """
+        if not self.gemini_pro_client or not failed_metrics:
+            logger.warning("Gemini Pro 클라이언트가 없거나 실패 메트릭이 없어 AI 분석을 건너뜁니다.")
+            return None
+        
+        logger.info("AI 기반 메트릭 실패 분석 시작")
+        
+        try:
+            # 분석할 데이터 준비
+            analysis_data = {}
+            total_failures = 0
+            
+            for metric_name, metric_data in failed_metrics.items():
+                translated_reasons = metric_data.get('translated_reasons', [])
+                failure_count = metric_data.get('failure_count', 0)
+                
+                if translated_reasons:
+                    analysis_data[metric_name] = {
+                        'failure_count': failure_count,
+                        'reasons': translated_reasons
+                    }
+                    total_failures += failure_count
+            
+            if not analysis_data:
+                return None
+            
+            system_instruction = """당신은 10년 경력의 시니어 소프트웨어 엔지니어이자 데이터 분석 전문가, 테크니컬 라이터입니다. 
+AI 코드 리뷰 도구의 평가 결과를 분석하여 개발팀이 실무에서 바로 활용할 수 있는 통찰력을 제공하는 것이 당신의 역할입니다.
+
+**전문 분야:**
+- 소프트웨어 품질 메트릭 분석 및 해석
+- 대규모 코드베이스의 패턴 식별 및 분류
+- 개발자 친화적 기술 문서 작성
+
+**분석 목표:**
+1. 실패 패턴의 근본 원인 파악 - 표면적 오류가 아닌 시스템적 문제점 식별
+2. 메트릭 간 상관관계 분석 - 복합적 실패 패턴과 의존성 관계 파악
+3. 읽기 힘든 개별 reason들을 가독성있고, 정확하게 요약 및 분석 - 실무진이 즉시 이해할 수 있는 명확한 언어로 변환
+
+**분석 관점:**
+- 기술적 정확성과 가독성을 균형 있게 고려
+- 데이터 기반 객관적 분석과 실무 경험에 기반한 통찰력 결합"""
+
+            # 분석 요청 메시지 구성
+            analysis_prompt = f"""
+다음은 AI 코드 리뷰 도구의 메트릭별 실패 분석 데이터입니다:
+
+## 실패 분석 데이터
+총 실패 건수: {total_failures}건
+
+"""
+            
+            for metric_name, data in analysis_data.items():
+                metric_display = {
+                    'correctness': '정확성',
+                    'clarity': '명확성', 
+                    'actionability': '실행가능성',
+                    'json_correctness': 'JSON 정확성'
+                }.get(metric_name, metric_name)
+                
+                analysis_prompt += f"""
+### {metric_display} 메트릭
+- 실패 건수: {data['failure_count']}건
+- 실패 이유들:
+"""
+                for i, reason in enumerate(data['reasons'], 1):
+                    analysis_prompt += f"  {i}. {reason}\n"
+            
+            analysis_prompt += """
+
+## 분석 요청사항
+
+다음 구조를 따라 체계적이고 실용적인 분석을 제공해주세요:
+
+### 1. 핵심 실패 패턴 요약
+**목적:** 개발팀이 우선적으로 해결해야 할 문제점 식별
+- 가장 빈번한 실패 유형 상위 3가지 (발생 횟수와 함께)
+- 각 패턴이 코드 리뷰 품질에 미치는 구체적 영향도 평가
+- 실패 패턴의 심각도를 '높음/중간/낮음'으로 분류하고 그 근거 제시
+
+### 2. 메트릭별 분류 및 특성 분석
+**목적:** 각 메트릭의 고유한 문제점과 개선 방향 제시
+- 메트릭별 주요 실패 원인을 카테고리화 (예: 로직 오류, 문서화 부족, 구조적 문제 등)
+- 메트릭 간 상관관계 패턴 분석 (예: "정확성 실패 시 명확성도 함께 실패하는 경향")
+- 각 메트릭의 개선 난이도와 예상 소요 시간 평가 ('단기 해결 가능' vs '중장기 개선 필요')
+
+**작성 지침:**
+- 실제 데이터를 구체적으로 인용하여 분석의 객관성 확보
+- 개발자가 이해하기 쉬운 명확한 한국어로 작성
+- 추상적 표현보다는 구체적이고 측정 가능한 기준 제시"""
+
+            # AI 분석 실행
+            messages = [{"role": "user", "content": analysis_prompt}]
+            
+            analysis_result = self.gemini_pro_client.query(
+                messages=messages,
+                system_instruction=system_instruction
+            )
+            
+            if analysis_result:
+                logger.info("AI 분석 완료")
+                return {
+                    'analysis_content': analysis_result,
+                    'analyzed_metrics': list(analysis_data.keys()),
+                    'total_failures_analyzed': total_failures,
+                    'analysis_timestamp': datetime.now().isoformat()
+                }
+            else:
+                logger.warning("AI 분석 결과가 비어있습니다.")
+                return None
+                
+        except Exception as e:
+            logger.error(f"AI 분석 실패: {e}")
+            return None
     
     def _generate_model_failure_analysis(self, log_results: Dict[str, List]) -> Dict[str, Any]:
         """모델별 실패 분석 데이터 생성
@@ -927,25 +1103,59 @@ class DeepEvalAnalysisEngine:
                             if latest_failure['reason'] not in failure_reasons:
                                 failure_reasons.append(latest_failure['reason'])
             
-            # 실패 이유 번역
-            translated_reasons = self._batch_translate_failure_reasons(failure_reasons)
-            
             # 메트릭별 실패 요약
             metric_summary = {}
             for metric_name, failures in failed_metrics.items():
                 if failures:
+                    # 해당 메트릭의 실패 이유들만 추출
+                    metric_failure_reasons = list(set(f['reason'] for f in failures))
+                    
+                    # 해당 메트릭의 실패 이유들만 번역
+                    metric_translated_reasons = self._batch_translate_failure_reasons(metric_failure_reasons)
+
                     metric_summary[metric_name] = {
                         'failure_count': len(failures),
                         'avg_confidence': sum(f['confidence'] for f in failures) / len(failures) if failures else 0,
-                        'common_reasons': list(set(f['reason'] for f in failures))[:3]  # 상위 3개
+                        'failure_reasons': metric_failure_reasons,
+                        'translated_reasons': metric_translated_reasons
                     }
-            
+                    
             model_failures[model_name] = {
                 'total_failures': failure_count,
                 'total_tests': len(test_results),
                 'failure_rate': failure_count / len(test_results) if test_results else 0,
                 'failed_metrics': metric_summary,
-                'failure_reasons': translated_reasons,
             }
-        
+
+            ai_analysis = self._analyze_metric_failures_with_ai(metric_summary)
+            model_failures[model_name]['ai_analyzed_failure_summary'] = ai_analysis
+            
         return model_failures
+    
+    def _generate_ai_failure_summary(self, model_failure_analysis: Dict[str, Any]) -> Optional[str]:
+        """모델별 AI 분석 결과를 LLM을 통해 종합하여 간략한 실패 사유 요약 생성
+        
+        Args:
+            model_failure_analysis: 모델별 실패 분석 데이터
+            
+        Returns:
+            종합 실패 분석 요약 문자열 또는 None
+        """
+        lines = []
+        
+        # 각 모델의 AI 분석 결과 수집
+        for model_name, model_data in model_failure_analysis.items():
+            if model_data.get('ai_analysis'):
+                ai_analysis = model_data['ai_analysis']
+                lines.extend([
+                    f"## 🤖 {model_name} AI 기반 실패 사유 분석",
+                    "",
+                    f"**분석 대상**: {', '.join(ai_analysis['analyzed_metrics'])} 메트릭",
+                    f"**총 분석 실패 건수**: {ai_analysis['total_failures_analyzed']}건", 
+                    "",
+                    ai_analysis['analysis_content'],
+                    ""
+                ])
+        
+        return "\n".join(lines) if lines else None
+       

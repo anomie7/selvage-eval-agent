@@ -3,6 +3,7 @@
 Google Gemini API에 대한 단순한 래퍼 클라이언트입니다.
 """
 
+import concurrent.futures
 import logging
 from typing import Dict, List, Optional, Any, Type
 
@@ -179,3 +180,68 @@ class GeminiClient:
             else:
                 logger.warning(f"Tool {tool} does not have get_function_declaration method")
         return function_declarations
+
+    def batch_query(
+        self,
+        batch_requests: List[Dict[str, Any]],
+        system_instruction: str,
+        max_workers: int = 5,
+        response_schema: Optional[Type[BaseModel]] = None
+    ) -> List[Any]:
+        """여러 요청을 병렬로 처리하여 Gemini API 성능 최적화
+        
+        Args:
+            batch_requests: 배치 요청 리스트, 각 요청은 {'messages': [...]} 형식
+            system_instruction: 시스템 인스트럭션
+            max_workers: 최대 동시 처리 스레드 수 (기본값: 5)
+            response_schema: 구조화된 출력을 위한 Pydantic BaseModel 클래스
+            
+        Returns:
+            List[Any]: 각 요청에 대한 응답 리스트
+            
+        Raises:
+            RuntimeError: 클라이언트가 초기화되지 않은 경우
+        """
+        if self.client is None:
+            raise RuntimeError("Gemini client not initialized")
+        
+        if not batch_requests:
+            return []
+        
+        logger.info(f"병렬 처리 시작: {len(batch_requests)}개 요청, 최대 {max_workers}개 워커")
+        
+        def process_single_request(request_data: Dict[str, Any]) -> Any:
+            """단일 요청 처리"""
+            try:
+                messages = request_data.get('messages', [])
+                return self.query(
+                    messages=messages,
+                    system_instruction=system_instruction,
+                    response_schema=response_schema
+                )
+            except Exception as e:
+                logger.error(f"배치 요청 처리 중 오류: {e}")
+                return None
+        
+        # ThreadPoolExecutor를 사용한 병렬 처리
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 모든 요청을 제출
+            future_to_index = {
+                executor.submit(process_single_request, request): i 
+                for i, request in enumerate(batch_requests)
+            }
+            
+            # 결과를 원래 순서대로 수집
+            results = [None] * len(batch_requests)
+            for future in concurrent.futures.as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    result = future.result()
+                    results[index] = result
+                except Exception as e:
+                    logger.error(f"배치 요청 {index} 처리 실패: {e}")
+                    results[index] = None
+        
+        logger.info(f"병렬 처리 완료: {len([r for r in results if r is not None])}/{len(batch_requests)} 성공")
+        return results
