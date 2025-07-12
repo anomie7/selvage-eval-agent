@@ -1141,21 +1141,115 @@ AI 코드 리뷰 도구의 평가 결과를 분석하여 개발팀이 실무에�
         Returns:
             종합 실패 분석 요약 문자열 또는 None
         """
-        lines = []
+        if not self.gemini_pro_client or not model_failure_analysis:
+            logger.warning("Gemini Pro 클라이언트가 없거나 모델 실패 분석 데이터가 없어 종합 분석을 건너뜁니다.")
+            return None
+        
+        logger.info("모델별 AI 분석 결과 종합 분석 시작")
         
         # 각 모델의 AI 분석 결과 수집
-        for model_name, model_data in model_failure_analysis.items():
-            if model_data.get('ai_analysis'):
-                ai_analysis = model_data['ai_analysis']
-                lines.extend([
-                    f"## 🤖 {model_name} AI 기반 실패 사유 분석",
-                    "",
-                    f"**분석 대상**: {', '.join(ai_analysis['analyzed_metrics'])} 메트릭",
-                    f"**총 분석 실패 건수**: {ai_analysis['total_failures_analyzed']}건", 
-                    "",
-                    ai_analysis['analysis_content'],
-                    ""
-                ])
+        model_analyses = {}
+        total_models_analyzed = 0
+        total_failures_across_models = 0
         
-        return "\n".join(lines) if lines else None
+        for model_name, model_data in model_failure_analysis.items():
+            ai_analysis = model_data.get('ai_analyzed_failure_summary')
+            if ai_analysis and ai_analysis.get('analysis_content'):
+                model_analyses[model_name] = ai_analysis
+                total_models_analyzed += 1
+                total_failures_across_models += ai_analysis.get('total_failures_analyzed', 0)
+        
+        if not model_analyses:
+            logger.warning("종합 분석할 모델별 AI 분석 결과가 없습니다.")
+            return None
+        
+        logger.info(f"총 {total_models_analyzed}개 모델의 AI 분석 결과를 종합 분석합니다.")
+        
+        try:
+            # 종합 분석을 위한 시스템 인스트럭션
+            system_instruction = """당신은 15년 경력의 시니어 소프트웨어 엔지니어이자 데이터 분석 전문가입니다. 
+AI 코드 리뷰 도구의 여러 모델별 평가 결과를 종합하여 전체적인 실패 패턴과 특성을 파악하는 것이 당신의 역할입니다.
+
+**전문 분야:**
+- 대규모 소프트웨어 프로젝트의 품질 메트릭 분석
+- 여러 AI 모델의 성능 비교 및 패턴 분석
+- 복잡한 데이터를 명확하고 간결하게 요약하는 기술 문서 작성
+
+**분석 목표:**
+1. 모델별 실패 패턴을 종합하여 전체적인 실패 특성과 공통점 파악
+2. 모델 간 실패 패턴의 차이점과 유사점 식별
+3. 보고서 읽는 사람이 한눈에 파악할 수 있는 명확한 요약 제공
+
+**중요한 제약사항:**
+- 개선 방안이나 권고사항은 절대 제시하지 마세요
+- 실패 분석과 패턴 파악에만 집중하세요
+- 문제 해결책이나 개선 제안은 포함하지 마세요"""
+
+            # 종합 분석 프롬프트 구성
+            analysis_prompt = f"""다음은 AI 코드 리뷰 도구의 {total_models_analyzed}개 모델별 실패 분석 결과입니다:
+
+## 전체 개요
+- 분석된 모델 수: {total_models_analyzed}개
+- 총 실패 건수: {total_failures_across_models}건
+
+## 모델별 분석 결과
+"""
+
+            for model_name, ai_analysis in model_analyses.items():
+                analysis_prompt += f"""
+### {model_name} 모델
+- 분석 대상 메트릭: {', '.join(ai_analysis.get('analyzed_metrics', []))}
+- 실패 건수: {ai_analysis.get('total_failures_analyzed', 0)}건
+- 상세 분석:
+{ai_analysis.get('analysis_content', 'N/A')}
+
+---
+"""
+
+            analysis_prompt += """
+## 종합 분석 요청사항
+
+다음 구조에 따라 모델별 분석 결과를 종합하여 간결하고 명확한 요약을 제공해주세요:
+
+### 1. 전체 실패 패턴 요약
+**목적:** 모든 모델에서 공통적으로 나타나는 실패 패턴 파악
+- 모든 모델에서 공통으로 나타나는 주요 실패 유형 (발생 빈도 포함)
+- 실패 패턴의 심각도와 영향도 평가
+
+### 2. 모델별 실패 특성 비교
+**목적:** 모델 간 실패 패턴의 차이점과 유사점 식별
+- 각 모델의 고유한 실패 패턴 특성
+- 모델 간 실패 패턴의 유사점과 차이점
+- 특정 메트릭에서 두드러지는 모델별 특성
+
+### 3. 핵심 발견사항
+**목적:** 보고서 읽는 사람이 가장 중요하게 알아야 할 사실들
+- 가장 주목할 만한 실패 패턴 상위 3가지
+- 예상치 못한 실패 패턴이나 특이사항
+- 전체 분석에서 도출되는 핵심 통찰
+
+**작성 지침:**
+- 구체적인 데이터와 수치를 인용하여 객관성 확보
+- 기술적으로 정확하면서도 이해하기 쉬운 한국어로 작성
+- 추상적 표현보다는 구체적이고 측정 가능한 기준으로 설명
+- 개선 방안이나 권고사항은 절대 포함하지 마세요"""
+
+            # AI 종합 분석 실행
+            messages = [{"role": "user", "content": analysis_prompt}]
+            
+            comprehensive_analysis = self.gemini_pro_client.query(
+                messages=messages,
+                system_instruction=system_instruction
+            )
+            
+            if comprehensive_analysis:
+                logger.info("모델별 AI 분석 결과 종합 분석 완료")
+                return comprehensive_analysis.strip()
+            else:
+                logger.warning("종합 분석 결과가 비어있습니다.")
+                return None
+                
+        except Exception as e:
+            logger.error(f"종합 분석 실행 실패: {e}")
+            return None
        
