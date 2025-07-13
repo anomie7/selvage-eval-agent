@@ -1,0 +1,89 @@
+# 커밋 수집 다양성 설정
+# 연구 데이터 기반: 오픈소스 프로젝트 9개 분석 결과를 반영한 과학적 설정
+
+# 전체 커밋 수집 설정
+commits_per_repo: 20  # 저장소당 수집할 커밋 개수
+
+# 커밋 다양성 설정
+commit_diversity:
+  enabled: true  # 다양성 기반 선택 활성화
+  
+  # 커밋 크기별 분류 기준 (라인 수 기준)
+  size_thresholds:
+    extra_small_max: 5      # 극소규모: 0-5라인
+    small_max: 46           # 소규모: 6-46라인  
+    medium_max: 106         # 중간규모: 47-106라인
+    large_max: 166          # 대규모: 107-166라인
+    # 극대규모: 167라인 이상
+  
+  # 파일 수 보정 기준
+  file_correction:
+    large_file_threshold: 11    # 11개 이상 파일시 LARGE로 상향
+    single_file_large_lines: 100  # 단일 파일에 100라인 초과시 LARGE로 제한
+  
+  # 카테고리별 선택 비율 및 제약 (연구 데이터 기반)
+  categories:
+    extra_small:
+      target_ratio: 0.20    # 20% (연구: 19.9%)
+      min_count: 2          # 최소 선택 개수
+      max_count: 6          # 최대 선택 개수  
+      score_boost: 15       # 다양성을 위한 점수 보정
+      description: "극소규모 변경 (타이포, 간단한 설정)"
+      
+    small:
+      target_ratio: 0.55    # 55% (연구: 55.3%)
+      min_count: 8          # 최소 선택 개수
+      max_count: 14         # 최대 선택 개수
+      score_boost: 10       # 다양성을 위한 점수 보정
+      description: "소규모 변경 (간단한 버그 수정, 작은 기능)"
+      
+    medium:
+      target_ratio: 0.11    # 11% (연구: 11.1%) 
+      min_count: 1          # 최소 선택 개수
+      max_count: 4          # 최대 선택 개수
+      score_boost: 5        # 다양성을 위한 점수 보정
+      description: "중간규모 변경 (기능 개선, 리팩토링)"
+      
+    large:
+      target_ratio: 0.04    # 4% (연구: 4.3%)
+      min_count: 0          # 최소 선택 개수 (없을 수도 있음)
+      max_count: 2          # 최대 선택 개수
+      score_boost: 0        # 점수 보정 없음
+      description: "대규모 변경 (새로운 기능 구현)"
+      
+    extra_large:
+      target_ratio: 0.10    # 10% (연구: 9.4%)
+      min_count: 1          # 최소 선택 개수
+      max_count: 3          # 최대 선택 개수
+      score_boost: 0        # 점수 보정 없음
+      description: "극대규모 변경 (주요 기능, 아키텍처 변경)"
+
+# 선택 알고리즘 설정
+selection_algorithm:
+  # 카테고리별 할당량 계산 방식
+  allocation_method: "proportional"  # proportional, fixed, adaptive
+  
+  # 부족한 카테고리 처리 방식
+  shortage_handling: "redistribute"  # redistribute, skip, fallback
+  
+  # 여분 할당 전략
+  surplus_strategy: "quality_first"  # quality_first, maintain_ratio, random
+
+# 품질 점수 조정
+quality_scoring:
+  # 다양성 vs 품질 균형 (0.0: 품질 우선, 1.0: 다양성 우선)
+  diversity_weight: 0.3
+  
+  # 카테고리별 최소 품질 점수 요구사항
+  min_quality_scores:
+    extra_small: 60
+    small: 65
+    medium: 70
+    large: 75
+    extra_large: 80
+
+# 디버깅 및 로깅 설정
+debug:
+  log_category_distribution: true
+  log_selection_details: true
+  export_selection_report: true

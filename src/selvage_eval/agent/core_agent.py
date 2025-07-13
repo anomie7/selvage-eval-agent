@@ -846,14 +846,14 @@ class SelvageEvaluationAgent:
             self._update_state(phase3_result)
             
             # Phase 4: 분석 실행 (Phase 3 성공 시에만 실행)
-            if phase3_result.get("status") == "completed":
-                logger.info("Phase 3 completed successfully, executing Phase 4")
-                phase4_result = self._execute_phase4_analysis()
+            # if phase3_result.get("status") == "completed":
+            #     logger.info("Phase 3 completed successfully, executing Phase 4")
+            #     phase4_result = self._execute_phase4_analysis()
                 
-                # Phase 4 상태 업데이트
-                self._update_state(phase4_result)
-            else:
-                logger.warning("Phase 3 failed or incomplete, skipping Phase 4")
+            #     # Phase 4 상태 업데이트
+            #     self._update_state(phase4_result)
+            # else:
+            #     logger.warning("Phase 3 failed or incomplete, skipping Phase 4")
         else:
             logger.warning("Phase 2 failed or incomplete, skipping Phase 3 and 4")
         
@@ -1081,7 +1081,7 @@ class SelvageEvaluationAgent:
                     # Claude Sonnet-4-Thinking 모델 rate limit 처리
                     if model == "claude-sonnet-4-thinking":
                         logger.info("Claude Sonnet-4-Thinking rate limit 처리를 위해 60초 대기 중...")
-                        time.sleep(60)
+                        time.sleep(180)
                         logger.info("Rate limit 대기 완료")
                     
                 except Exception as model_error:
