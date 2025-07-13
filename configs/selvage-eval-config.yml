@@ -43,7 +43,7 @@ review_models:
   - "gemini-2.5-flash"
   - "o3"
   - "o4-mini-high"
-  - "claude-sonnet-4-thinking"
+  # - "claude-sonnet-4-thinking"
   - "claude-sonnet-4"
 
 commit_filters:
@@ -72,49 +72,3 @@ selvage:
   binary_path: "/Users/demin_coder/.local/bin/selvage"
   timeout_seconds: 300
   
-# DeepEval 설정
-deepeval:
-  metrics:
-    - name: "Correctness"
-      description: "리뷰의 정확성"
-      threshold: 0.7
-    - name: "Clarity" 
-      description: "리뷰의 명확성"
-      threshold: 0.6
-    - name: "Actionability"
-      description: "실행 가능성"
-      threshold: 0.6
-    - name: "JsonCorrectness"
-      description: "JSON 형식 정확성"
-      threshold: 0.8
-
-# 보안 및 리소스 제한
-security:
-  allowed_paths:
-    - "./selvage-eval-results/"
-    - "/Users/demin_coder/Dev/cline"
-    - "/Users/demin_coder/Dev/selvage-deprecated"
-    - "/Users/demin_coder/Dev/ecommerce-microservices"
-    - "/Users/demin_coder/Dev/kotlin-realworld"
-  forbidden_commands:
-    - "rm"
-    - "rmdir"
-    - "delete"
-    - "chmod"
-    - "chown"
-    - "curl"
-    - "wget"
-    - "sudo"
-    - "su"
-
-resource_limits:
-  max_memory_mb: 2048
-  max_cpu_percent: 80
-  max_disk_gb: 10
-  max_execution_time: 3600  # 1시간
-
-# 로깅 설정
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "./logs/selvage-eval.log"

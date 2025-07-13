@@ -235,7 +235,8 @@ class DeepEvalExecutorTool(Tool):
             # DisplayConfig 설정
             display_config = DisplayConfig(
                 display_option=self._convert_display_filter_to_enum(display_filter, TestRunResultDisplay),
-                file_output_dir=str(output_path)
+                file_output_dir=str(output_path),
+                verbose_mode=True,
             )
             
             # AsyncConfig 설정
@@ -272,7 +273,7 @@ class DeepEvalExecutorTool(Tool):
             # DeepEval을 가져올 수 없는 경우 빈 리스트 반환
             return []
         
-        model = "gemini-2.0-flash-exp"
+        model = "gemini-2.5-pro"
         
         # Correctness GEval - 코드 리뷰 정확성 평가
         correctness = GEval(
@@ -347,6 +348,86 @@ class DeepEvalExecutorTool(Tool):
         except Exception:
             # JsonCorrectnessMetric 생성 실패 시 다른 메트릭만 반환
             return [correctness, clarity, actionability]
+    
+    def _create_improved_metrics(self) -> List[Any]:
+        """개선된 평가 메트릭 생성 (실험용)
+        
+        학술 연구 기반으로 설계된 새로운 메트릭 4개를 생성합니다.
+        기존 _create_metrics()와는 독립적으로 작동하며, 실험 목적으로 사용됩니다.
+        
+        Returns:
+            List[Any]: 개선된 DeepEval 메트릭 리스트
+        """
+        try:
+            from deepeval.metrics.g_eval.g_eval import GEval
+            from deepeval.test_case.llm_test_case import LLMTestCaseParams
+        except ImportError:
+            # DeepEval을 가져올 수 없는 경우 빈 리스트 반환
+            return []
+        
+        model = "gemini-2.5-pro"
+        
+        # 1. Defect Detection Rate GEval (25%)
+        defect_detection = GEval(
+            name="DefectDetectionRate",
+            model=model,
+            evaluation_steps=[
+                "코드에서 실제 버그, 보안 취약점, 성능 문제를 정확히 식별했는지 평가",
+                "False Positive (잘못된 지적) 비율을 확인하고 정확한 지적만 있는지 검증",
+                "Critical한 이슈를 놓치지 않았는지 검증 - 심각한 문제의 누락 여부 평가",
+                "이슈의 우선순위가 실제 영향도와 일치하는지 평가 - 심각도 분류의 적절성",
+                "제기된 문제가 실제 프로덕션 환경에서 발생할 수 있는 현실적인 이슈인지 확인"
+            ],
+            evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
+            threshold=0.7,
+        )
+        
+        # 2. Review Efficiency GEval (30%)
+        review_efficiency = GEval(
+            name="ReviewEfficiency",
+            model=model,
+            evaluation_steps=[
+                "개발자가 리뷰를 이해하고 적용하는 데 필요한 노력과 시간을 평가",
+                "불필요하거나 중복된 제안이 있는지 확인 - 효율성 저해 요소 식별",
+                "제안의 구체성과 실용성 평가 - 실제 구현 가능한 구체적 가이드 제공 여부",
+                "코드 품질 개선에 실질적으로 기여하는지 검증 - 의미있는 개선사항 여부",
+                "개발 워크플로우를 방해하지 않고 자연스럽게 적용할 수 있는지 평가"
+            ],
+            evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
+            threshold=0.7,
+        )
+        
+        # 3. Context Awareness GEval (25%)
+        context_awareness = GEval(
+            name="ContextAwareness",
+            model=model,
+            evaluation_steps=[
+                "전체 코드베이스와의 일관성을 고려한 리뷰인지 평가 - 시스템 전반의 이해도",
+                "아키텍처 패턴과 설계 원칙 준수 여부 확인 - 기존 설계와의 호환성",
+                "프로젝트 특성과 요구사항을 이해한 제안인지 검증 - 도메인 지식 반영",
+                "기존 코드 스타일과 컨벤션과의 일치성 평가 - 팀 표준 준수",
+                "다른 모듈이나 컴포넌트와의 상호작용을 고려한 제안인지 확인"
+            ],
+            evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
+            threshold=0.7,
+        )
+        
+        # 4. Impact Assessment GEval (20%)
+        impact_assessment = GEval(
+            name="ImpactAssessment",
+            model=model,
+            evaluation_steps=[
+                "제안된 변경사항의 실제 영향도를 정확히 평가했는지 확인",
+                "성능, 보안, 유지보수성에 대한 영향 분석의 정확성과 완전성 검증",
+                "변경으로 인한 부작용이나 리스크를 식별하고 대안을 제시했는지 확인",
+                "비용 대비 효과를 적절히 고려했는지 평가 - ROI 관점의 분석",
+                "장기적인 기술 부채나 확장성에 미치는 영향을 고려했는지 검증"
+            ],
+            evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.INPUT],
+            threshold=0.7,
+        )
+        
+        return [defect_detection, review_efficiency, context_awareness, impact_assessment]
     
     def _load_test_cases(self, test_cases_file: Path) -> List[Any]:
         """테스트 케이스 JSON 파일 로드"""

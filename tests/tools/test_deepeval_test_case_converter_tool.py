@@ -76,11 +76,11 @@ def sample_review_log_data():
 
 
 @pytest.fixture
-def review_logs_structure(temp_base_dir, sample_review_log_data):
+def review_logs_structure(temp_base_dir, sample_review_log_data, sample_session_id):
     """리뷰 로그 디렉토리 구조 생성"""
     base_dir = temp_base_dir / "review_logs"
     
-    # 디렉토리 구조: repo_name/commit_id/model_name/
+    # 디렉토리 구조: session_id/repo_name/commit_id/model_name/
     repos_data = [
         ("test-repo-1", "abc123", "gemini-2.5-pro"),
         ("test-repo-1", "abc123", "claude-3-sonnet"),
@@ -90,7 +90,7 @@ def review_logs_structure(temp_base_dir, sample_review_log_data):
     created_files = []
     
     for repo_name, commit_id, model_name in repos_data:
-        model_dir = base_dir / repo_name / commit_id / model_name
+        model_dir = base_dir / sample_session_id / repo_name / commit_id / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
         
         # 리뷰 로그 파일 생성
@@ -161,27 +161,27 @@ class TestDeepEvalTestCaseConverterTool:
         params = {"session_id": "test", "review_logs_path": 123}
         assert tool.validate_parameters(params) is False
     
-    def test_scan_review_logs_empty_directory(self, temp_base_dir):
+    def test_scan_review_logs_empty_directory(self, temp_base_dir, sample_session_id):
         """빈 디렉토리 스캔 테스트"""
         tool = DeepEvalTestCaseConverterTool()
         
         # 존재하지 않는 경로
         non_existent_path = temp_base_dir / "non_existent"
-        result = tool._scan_review_logs(non_existent_path)
+        result = tool._scan_review_logs(non_existent_path, sample_session_id)
         assert result == []
         
         # 빈 디렉토리
         empty_dir = temp_base_dir / "empty"
         empty_dir.mkdir()
-        result = tool._scan_review_logs(empty_dir)
+        result = tool._scan_review_logs(empty_dir, sample_session_id)
         assert result == []
     
-    def test_scan_review_logs_with_files(self, temp_base_dir, review_logs_structure):
+    def test_scan_review_logs_with_files(self, temp_base_dir, sample_session_id, review_logs_structure):
         """파일이 있는 디렉토리 스캔 테스트"""
         tool = DeepEvalTestCaseConverterTool()
         
         logs_path = temp_base_dir / "review_logs"
-        result = tool._scan_review_logs(logs_path)
+        result = tool._scan_review_logs(logs_path, sample_session_id)
         
         assert len(result) == 3
         

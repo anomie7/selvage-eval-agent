@@ -56,7 +56,7 @@ class DeepEvalTestCaseConverterTool(Tool):
     """DeepEval 테스트 케이스 변환 도구"""
     
     def __init__(self):
-        self.review_logs_base_path = "~/Library/selvage-eval-agent/review_logs"
+        self.review_logs_base_path = "~/Library/selvage-eval/review_logs"
         self.output_base_path = "~/Library/selvage-eval/deep_eval_test_case"
     
     @property
@@ -120,7 +120,7 @@ class DeepEvalTestCaseConverterTool(Tool):
             output_base = Path(output_path or self.output_base_path).expanduser()
             
             # 리뷰 로그 스캔
-            review_logs = self._scan_review_logs(logs_path)
+            review_logs = self._scan_review_logs(logs_path, session_id)
             if not review_logs:
                 return ToolResult(
                     success=False,
@@ -190,15 +190,18 @@ class DeepEvalTestCaseConverterTool(Tool):
                 error_message=f"DeepEval 테스트 케이스 변환 실패: {str(e)}"
             )
     
-    def _scan_review_logs(self, base_path: Path) -> List[ReviewLogInfo]:
-        """리뷰 로그 디렉토리 스캔"""
+    def _scan_review_logs(self, base_path: Path, session_id: str) -> List[ReviewLogInfo]:
+        """리뷰 로그 디렉토리 스캔 - 특정 세션에 해당하는 로그만 처리"""
         review_logs = []
         
-        if not base_path.exists():
+        # session_id 경로로 직접 이동
+        session_path = base_path / session_id
+        
+        if not session_path.exists():
             return review_logs
         
         # repo_name 폴더 순회
-        for repo_dir in base_path.iterdir():
+        for repo_dir in session_path.iterdir():
             if not repo_dir.is_dir():
                 continue
                 
