@@ -9,7 +9,12 @@ import json
 import logging
 import os
 import re
+import time
+from datetime import datetime
+from pathlib import Path
 
+from selvage_eval.commit_collection import CommitCollector
+from selvage_eval.tools.review_executor_tool import ReviewExecutorTool
 from selvage_eval.tools.tool import Tool
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult
@@ -18,6 +23,8 @@ from selvage_eval.tools.write_file_tool import WriteFileTool
 from selvage_eval.tools.file_exists_tool import FileExistsTool
 from selvage_eval.tools.execute_safe_command_tool import ExecuteSafeCommandTool
 from selvage_eval.tools.list_directory_tool import ListDirectoryTool
+from selvage_eval.tools.deepeval_test_case_converter_tool import DeepEvalTestCaseConverterTool
+from selvage_eval.tools.deepeval_executor_tool import DeepEvalExecutorTool
 
 from ..config.settings import EvaluationConfig
 from ..memory.session_state import SessionState
@@ -228,7 +235,10 @@ class SelvageEvaluationAgent:
             WriteFileTool(),
             FileExistsTool(),
             ExecuteSafeCommandTool(),
-            ListDirectoryTool()
+            ListDirectoryTool(),
+            ReviewExecutorTool(),
+            DeepEvalExecutorTool(),
+            DeepEvalTestCaseConverterTool()
         ]
     
     def plan_execution_loop(self, user_query: str, max_iterations: int = 25) -> str:
@@ -786,7 +796,7 @@ class SelvageEvaluationAgent:
         ]
         
         if utilization_percent > 80:
-            info_parts.append("\n⚠️  컨텍스트 사용률이 높습니다. '/clear' 명령어로 초기화를 고려해보세요.")
+            info_parts.append("컨텍스트 사용률이 높습니다. '/clear' 명령어로 초기화를 고려해보세요.")
         
         return "\n".join(info_parts)
     
@@ -802,24 +812,104 @@ class SelvageEvaluationAgent:
         
         logger.info("Starting automatic evaluation execution")
         
-        while True:
-            # Analyze current state
-            current_state = self._analyze_current_state()
+        # 사전 조건 검증
+        validation_result = self._validate_preconditions()
+        if not validation_result["valid"]:
+            error_msg = f"Precondition validation failed: {validation_result['errors']}"
+            logger.error(error_msg)
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "validation_errors": validation_result["errors"],
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Phase 1: 커밋 수집 (조건부 실행)
+        commits_file = self.config.get_output_path("meaningful_commits.json")
+        commits_exist = self.execute_tool("file_exists", {"file_path": commits_file})
+        if not (commits_exist.success and commits_exist.data.get("exists")):
+            logger.info("meaningful_commits.json not found, executing Phase 1")
+            self._execute_phase1_commit_collection()
+        else:
+            logger.info("meaningful_commits.json found, skipping Phase 1")
+        
+        # Phase 2: 리뷰 실행 (항상 실행)
+        current_state = {"session_id": self.session_state.session_id}
+        phase2_result = self._execute_phase2_review_execution(current_state)
+        
+        # Phase 3: DeepEval 변환 및 평가 실행 (Phase 2 성공 시에만 실행)
+        if phase2_result.get("status") == "completed":
+            logger.info("Phase 2 completed successfully, executing Phase 3")
+            phase3_result = self._execute_phase3_deepeval_conversion()
             
-            # Decide next action
-            next_action = self._decide_next_action(current_state)
+            # Phase 3 상태 업데이트
+            self._update_state(phase3_result)
             
-            if next_action == "COMPLETE":
-                break
+            # Phase 4: 분석 실행 (Phase 3 성공 시에만 실행)
+            if phase3_result.get("status") == "completed":
+                logger.info("Phase 3 completed successfully, executing Phase 4")
+                phase4_result = self._execute_phase4_analysis()
                 
-            # Execute action
-            action_result = self._execute_action(next_action, current_state)
-            
-            # Save result and update state
-            self._update_state(action_result)
+                # Phase 4 상태 업데이트
+                self._update_state(phase4_result)
+            else:
+                logger.warning("Phase 3 failed or incomplete, skipping Phase 4")
+        else:
+            logger.warning("Phase 2 failed or incomplete, skipping Phase 3 and 4")
         
         # Generate final report
         return self._generate_final_report()
+    
+    def _validate_preconditions(self) -> Dict[str, Any]:
+        """
+        실행 전 사전 조건 검증
+        
+        Returns:
+            검증 결과 딕셔너리
+        """
+        errors = []
+        
+        # 1. 대상 저장소 경로 검증
+        for repo in self.config.target_repositories:
+            if not os.path.exists(repo.path):
+                errors.append(f"Repository path does not exist: {repo.path}")
+            elif not os.path.isdir(repo.path):
+                errors.append(f"Repository path is not a directory: {repo.path}")
+            elif not os.path.exists(os.path.join(repo.path, '.git')):
+                errors.append(f"Not a valid git repository: {repo.path}")
+
+        
+        # 2. 필수 설정 값 검증
+        if not self.config.review_models:
+            errors.append("No review models configured")
+        
+        # 4. API 키 검증 (환경 변수)
+        api_keys_missing = []
+        for model in self.config.review_models:
+            if 'openai' in model.lower() or 'gpt' in model.lower():
+                if not os.getenv('OPENAI_API_KEY'):
+                    api_keys_missing.append('OPENAI_API_KEY')
+            elif 'claude' in model.lower() or 'anthropic' in model.lower():
+                if not os.getenv('ANTHROPIC_API_KEY'):
+                    api_keys_missing.append('ANTHROPIC_API_KEY')
+            elif 'gemini' in model.lower() or 'google' in model.lower():
+                if not os.getenv('GEMINI_API_KEY'):
+                    api_keys_missing.append('GEMINI_API_KEY')
+        
+        if api_keys_missing:
+            errors.append(f"Missing API keys: {', '.join(set(api_keys_missing))}")
+        
+        # 5. Selvage 바이너리 검증
+        selvage_path = "/Users/demin_coder/.local/bin/selvage"
+        if not os.path.exists(selvage_path):
+            errors.append(f"Selvage binary not found at: {selvage_path}")
+        elif not os.access(selvage_path, os.X_OK):
+            errors.append(f"Selvage binary not executable: {selvage_path}")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors
+        }
     
     def _analyze_current_state(self) -> Dict[str, Any]:
         """
@@ -845,16 +935,24 @@ class SelvageEvaluationAgent:
             # TODO: Load actual commit data
         
         # Phase 2: Check review execution status
-        review_logs_dir = self.config.get_output_path("review_logs")
-        review_logs_exist = self.execute_tool("file_exists", {"file_path": review_logs_dir})
-        if review_logs_exist.success and review_logs_exist.data.get("exists"):
+        review_logs_dir = self.config.get_review_logs_path()
+        list_result = self.execute_tool("list_directory", {"path": review_logs_dir})
+        if list_result.success and list_result.data.get("files"):
             state["completed_phases"].append("review_execution")
         
         # Phase 3: Check DeepEval results
-        eval_results_file = self.config.get_output_path("evaluations", "evaluation_results.json")
-        eval_results_exist = self.execute_tool("file_exists", {"file_path": eval_results_file})
-        if eval_results_exist.success and eval_results_exist.data.get("exists"):
+        deepeval_results_dir = f"~/Library/selvage-eval/deepeval_results/{self.session_state.session_id}"
+        expanded_path = os.path.expanduser(deepeval_results_dir)
+        deepeval_list_result = self.execute_tool("list_directory", {"path": expanded_path})
+        if deepeval_list_result.success and deepeval_list_result.data.get("files"):
             state["completed_phases"].append("deepeval_conversion")
+        
+        # Phase 4: Check analysis results
+        analysis_results_dir = f"~/Library/selvage-eval/analyze_results/{self.session_state.session_id}"
+        analysis_expanded_path = os.path.expanduser(analysis_results_dir)
+        analysis_list_result = self.execute_tool("list_directory", {"path": analysis_expanded_path})
+        if analysis_list_result.success and analysis_list_result.data.get("files"):
+            state["completed_phases"].append("analysis")
         
         # Determine next required phase
         if "commit_collection" not in state["completed_phases"]:
@@ -866,6 +964,7 @@ class SelvageEvaluationAgent:
         elif "analysis" not in state["completed_phases"]:
             state["next_required_phase"] = "analysis"
         else:
+            # 모든 Phase 완료
             state["next_required_phase"] = "complete"
         
         return state
@@ -896,56 +995,269 @@ class SelvageEvaluationAgent:
         
         return f"EXECUTE_{next_phase.upper()}"
     
-    def _execute_action(self, action: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute decided action
-        
-        Args:
-            action: Action to execute
-            current_state: Current state
-            
-        Returns:
-            Action execution result
-        """
-        logger.info(f"Executing action: {action}")
-        
-        # TODO: Implement concrete phase implementations
-        if action == "EXECUTE_COMMIT_COLLECTION":
-            return self._execute_phase1_commit_collection()
-        elif action == "EXECUTE_REVIEW_EXECUTION":
-            return self._execute_phase2_review_execution(current_state)
-        elif action == "EXECUTE_DEEPEVAL_CONVERSION":
-            return self._execute_phase3_deepeval_conversion(current_state)
-        elif action == "EXECUTE_ANALYSIS":
-            return self._execute_phase4_analysis(current_state)
-        elif action.startswith("SKIP_TO_"):
-            return {"action": action, "skipped": True}
-        else:
-            raise ValueError(f"Unknown action: {action}")
-    
     def _execute_phase1_commit_collection(self) -> Dict[str, Any]:
-        """Phase 1: Commit collection execution (placeholder implementation)"""
+        """Phase 1: Commit collection execution"""
+        start_time = time.time()
         logger.info("Executing Phase 1: Commit Collection")
-        # TODO: Actual implementation
-        return {"phase": "commit_collection", "status": "placeholder"}
+        
+        try:
+            # 커밋 수집 실행
+            commit_collector = CommitCollector(self.config, self.tool_executor)
+            meaningful_commits_data = commit_collector.collect_commits()
+            
+            # 결과 저장
+            output_path = self.config.get_output_path("meaningful_commits.json")
+            meaningful_commits_data.save_to_json(output_path)
+            
+            # 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "commit_collection",
+                "status": "completed",
+                "execution_time_seconds": round(execution_time, 2),
+                "commits_processed": meaningful_commits_data.total_commits,
+                "output_file": str(output_path),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 1 completed successfully in {execution_time:.2f}s, processed {meaningful_commits_data.total_commits} commits")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 1 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "commit_collection",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
     def _execute_phase2_review_execution(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Phase 2: Review execution (placeholder implementation)"""
+        """Phase 2: Review execution"""
+        start_time = time.time()
         logger.info("Executing Phase 2: Review Execution")
-        # TODO: Actual implementation
-        return {"phase": "review_execution", "status": "placeholder"}
+        
+        try:
+            # 사전 조건 검증
+            meaningful_commits_path = self.config.get_output_path("meaningful_commits.json")
+            if not os.path.exists(meaningful_commits_path):
+                raise FileNotFoundError(f"Required file not found: {meaningful_commits_path}")
+            
+            # current_state 정보 로깅
+            logger.info(f"Current state: {current_state}")
+            
+            # 리뷰 실행
+            review_executor = ReviewExecutorTool()
+            review_models = self.config.review_models
+            review_results = []
+            
+            for model in review_models:
+                model_start_time = time.time()
+                logger.info(f"Starting review execution for model: {model}")
+                
+                try:
+                    model_result = review_executor.execute(
+                        meaningful_commits_path=str(meaningful_commits_path),
+                        model=model,
+                        output_dir=self.config.get_review_logs_path(self.session_state.session_id)
+                    )
+                    
+                    model_execution_time = time.time() - model_start_time
+                    review_results.append({
+                        "model": model,
+                        "status": "completed",
+                        "execution_time_seconds": round(model_execution_time, 2),
+                        "result": model_result
+                    })
+                    
+                    logger.info(f"Model {model} completed in {model_execution_time:.2f}s")
+                    
+                    # Claude Sonnet-4-Thinking 모델 rate limit 처리
+                    if model == "claude-sonnet-4-thinking":
+                        logger.info("Claude Sonnet-4-Thinking rate limit 처리를 위해 60초 대기 중...")
+                        time.sleep(60)
+                        logger.info("Rate limit 대기 완료")
+                    
+                except Exception as model_error:
+                    model_execution_time = time.time() - model_start_time
+                    error_msg = f"Model {model} failed: {str(model_error)}"
+                    logger.error(error_msg, exc_info=True)
+                    
+                    review_results.append({
+                        "model": model,
+                        "status": "failed",
+                        "error": str(model_error),
+                        "execution_time_seconds": round(model_execution_time, 2)
+                    })
+            
+            # 전체 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 성공한 모델 수 계산
+            successful_models = [r for r in review_results if r["status"] == "completed"]
+            failed_models = [r for r in review_results if r["status"] == "failed"]
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "review_execution",
+                "status": "completed" if successful_models else "failed",
+                "execution_time_seconds": round(execution_time, 2),
+                "models_processed": len(review_models),
+                "successful_models": len(successful_models),
+                "failed_models": len(failed_models),
+                "output_directory": self.config.get_review_logs_path(),
+                "review_results": review_results,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 2 completed in {execution_time:.2f}s, {len(successful_models)}/{len(review_models)} models successful")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 2 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "review_execution",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
-    def _execute_phase3_deepeval_conversion(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Phase 3: DeepEval conversion (placeholder implementation)"""
-        logger.info("Executing Phase 3: DeepEval Conversion")
-        # TODO: Actual implementation
-        return {"phase": "deepeval_conversion", "status": "placeholder"}
+    def _execute_phase3_deepeval_conversion(self) -> Dict[str, Any]:
+        """Phase 3: DeepEval conversion and evaluation execution"""
+        start_time = time.time()
+        logger.info("Executing Phase 3: DeepEval Conversion and Evaluation")
+        
+        try:
+            # Step 1: DeepEval 테스트 케이스 변환
+            logger.info("Step 1: Converting review logs to DeepEval test cases")
+            converter_tool = DeepEvalTestCaseConverterTool()
+            
+            conversion_result = converter_tool.execute(
+                session_id=self.session_state.session_id,
+            )
+            
+            if not conversion_result.success:
+                raise Exception(f"DeepEval test case conversion failed: {conversion_result.error_message}")
+            
+            conversion_data = conversion_result.data
+            logger.info(f"Conversion completed: {conversion_data.get('total_files', 0)} model files converted")
+            
+            # Step 2: DeepEval 평가 실행
+            logger.info("Step 2: Executing DeepEval evaluation")
+            executor_tool = DeepEvalExecutorTool()
+            
+            evaluation_result = executor_tool.execute(
+                session_id=self.session_state.session_id,
+                parallel_workers=1,  # 기본값: 1
+                display_filter="all"
+            )
+            
+            if not evaluation_result.success:
+                raise Exception(f"DeepEval evaluation failed: {evaluation_result.error_message}")
+            
+            evaluation_data = evaluation_result.data
+            logger.info(f"Evaluation completed: {evaluation_data.get('total_evaluations', 0)} evaluations processed")
+            
+            # 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "deepeval_conversion",
+                "status": "completed",
+                "execution_time_seconds": round(execution_time, 2),
+                "conversion_results": {
+                    "total_files": conversion_data.get("total_files", 0),
+                    "converted_files": conversion_data.get("converted_files", []),
+                    "metadata_path": conversion_data.get("metadata_path")
+                },
+                "evaluation_results": {
+                    "total_evaluations": evaluation_data.get("total_evaluations", 0),
+                    "evaluation_results": evaluation_data.get("evaluation_results", {}),
+                    "metadata_path": evaluation_data.get("metadata_path")
+                },
+                "session_id": self.session_state.session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 3 completed successfully in {execution_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 3 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "deepeval_conversion",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
-    def _execute_phase4_analysis(self, current_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Phase 4: Analysis (placeholder implementation)"""
-        logger.info("Executing Phase 4: Analysis")
-        # TODO: Actual implementation
-        return {"phase": "analysis", "status": "placeholder"}
+    def _execute_phase4_analysis(self) -> Dict[str, Any]:
+        """Phase 4: Analysis"""
+        start_time = time.time()
+        logger.info("Executing Phase 4: DeepEval Results Analysis")
+        
+        try:
+            # DeepEval 결과 디렉토리 확인
+            deepeval_results_dir = f"~/Library/selvage-eval/deepeval_results/{self.session_state.session_id}"
+            expanded_path = os.path.expanduser(deepeval_results_dir)
+            
+            if not os.path.exists(expanded_path):
+                raise FileNotFoundError(f"DeepEval 결과 디렉토리를 찾을 수 없습니다: {expanded_path}")
+            
+            # 분석 엔진 초기화
+            from selvage_eval.analysis import DeepEvalAnalysisEngine
+            analysis_engine = DeepEvalAnalysisEngine()
+            
+            # 세션 분석 실행
+            analysis_results = analysis_engine.analyze_session(expanded_path)
+            
+            # 실행 시간 계산
+            execution_time = time.time() - start_time
+            
+            # 상세한 결과 반환
+            result = {
+                "phase": "analysis",
+                "status": "completed",
+                "execution_time_seconds": round(execution_time, 2),
+                "analysis_results": {
+                    "models_analyzed": analysis_results["analysis_metadata"]["models_analyzed"],
+                    "total_test_cases": analysis_results["analysis_metadata"]["total_test_cases"],
+                    "files_generated": analysis_results["files_generated"]
+                },
+                "session_id": self.session_state.session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Phase 4 completed successfully in {execution_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Phase 4 failed after {execution_time:.2f}s: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            return {
+                "phase": "analysis",
+                "status": "failed",
+                "error": str(e),
+                "execution_time_seconds": round(execution_time, 2),
+                "timestamp": datetime.now().isoformat()
+            }
     
     def _update_state(self, action_result: Dict[str, Any]) -> None:
         """Update state with action execution result
@@ -986,8 +1298,7 @@ class SelvageEvaluationAgent:
             "target_repositories": [repo.model_dump() for repo in self.config.target_repositories],
             "configuration": {
                 "commits_per_repo": self.config.commits_per_repo,
-                "workflow": self.config.workflow.model_dump(),
-                "deepeval_metrics": [metric.model_dump() for metric in self.config.deepeval.metrics]
+                "workflow": self.config.workflow.model_dump()
             }
         }
         

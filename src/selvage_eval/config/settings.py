@@ -5,7 +5,7 @@ Pydantic을 사용하여 타입 안전성과 검증을 보장합니다.
 """
 
 import os
-from typing import Dict, List, Optional, Any, Union
+from typing import List, Optional
 from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -96,22 +96,17 @@ class SelvageConfig(BaseModel):
         return v
 
 
-class DeepEvalMetric(BaseModel):
-    """DeepEval 메트릭 설정"""
-    name: str
-    description: str
-    threshold: float = Field(ge=0.0, le=1.0)
-
-
 class DeepEvalConfig(BaseModel):
     """DeepEval 설정"""
-    metrics: List[DeepEvalMetric]
+    metrics: List[str] = Field(default_factory=list)
+    display_filter: str = "fail"
+    verbose: bool = False
 
 
 class SecurityConfig(BaseModel):
     """보안 설정"""
-    allowed_paths: List[str]
-    forbidden_commands: List[str]
+    allowed_paths: List[str] = Field(default_factory=list)
+    forbidden_commands: List[str] = Field(default_factory=list)
 
 
 class ResourceLimits(BaseModel):
@@ -126,7 +121,6 @@ class LoggingConfig(BaseModel):
     """로깅 설정"""
     level: str = "INFO"
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    file: Optional[str] = None
 
 
 class EvaluationConfig(BaseModel):
@@ -139,10 +133,10 @@ class EvaluationConfig(BaseModel):
     commits_per_repo: int = 5
     workflow: WorkflowConfig
     selvage: SelvageConfig
-    deepeval: DeepEvalConfig
-    security: SecurityConfig
-    resource_limits: ResourceLimits
-    logging: LoggingConfig
+    deepeval: Optional[DeepEvalConfig] = None
+    security: Optional[SecurityConfig] = None
+    resource_limits: Optional[ResourceLimits] = None
+    logging: Optional[LoggingConfig] = None
     
     @model_validator(mode='after')
     def validate_config(self):
@@ -166,6 +160,13 @@ class EvaluationConfig(BaseModel):
         """출력 디렉토리 기준 경로 생성"""
         return os.path.join(self.evaluation.output_dir, *path_parts)
     
+    def get_review_logs_path(self, session_id: Optional[str] = None) -> str:
+        """리뷰 로그 디렉토리 경로 반환"""
+        base_path = os.path.expanduser("~/Library/selvage-eval/review_logs")
+        if session_id:
+            return os.path.join(base_path, session_id)
+        return base_path
+    
     def create_output_dirs(self) -> None:
         """필요한 출력 디렉토리 생성"""
         dirs_to_create = [
@@ -174,11 +175,6 @@ class EvaluationConfig(BaseModel):
             self.get_output_path("evaluations"),
             self.get_output_path("analysis"),
         ]
-        
-        if self.logging.file:
-            log_dir = os.path.dirname(self.logging.file)
-            if log_dir:
-                dirs_to_create.append(log_dir)
         
         for dir_path in dirs_to_create:
             os.makedirs(dir_path, exist_ok=True)

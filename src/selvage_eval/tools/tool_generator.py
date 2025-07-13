@@ -11,6 +11,9 @@ from .write_file_tool import WriteFileTool
 from .file_exists_tool import FileExistsTool
 from .execute_safe_command_tool import ExecuteSafeCommandTool
 from .list_directory_tool import ListDirectoryTool
+from .review_executor_tool import ReviewExecutorTool
+from .deepeval_test_case_converter_tool import DeepEvalTestCaseConverterTool
+from .deepeval_executor_tool import DeepEvalExecutorTool
 
 
 class ToolGenerator:
@@ -28,5 +31,11 @@ class ToolGenerator:
             return ExecuteSafeCommandTool()
         elif tool_name == "list_directory":
             return ListDirectoryTool()
+        elif tool_name == "execute_reviews":
+            return ReviewExecutorTool()
+        elif tool_name == "deepeval_test_case_converter":
+            return DeepEvalTestCaseConverterTool()
+        elif tool_name == "deepeval_executor":
+            return DeepEvalExecutorTool()
         else:
             raise ValueError(f"Unknown tool: {tool_name}") 
