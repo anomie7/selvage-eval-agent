@@ -3,7 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from .commit_stats import CommitStats
 from .commit_score import CommitScore
 from .commit_data import CommitData
@@ -288,23 +288,19 @@ class CommitCollector:
         )
     
     def _filter_commits(self, commits: List[CommitData]) -> List[CommitData]:
-        """키워드 및 통계 기준으로 커밋 필터링"""
+        """키워드 기준으로 커밋 필터링"""
         filtered_commits: List[CommitData] = []
         
         for commit in commits:
-            # 1. 통계 기준 필터링
-            if not self._passes_stats_filter(commit):
-                continue
-            
-            # 2. 키워드 기준 필터링
+            # 1. 키워드 기준 필터링
             if not self._passes_keyword_filter(commit):
                 continue
             
-            # 3. 머지 커밋 특별 처리
+            # 2. 머지 커밋 특별 처리
             if not self._passes_merge_filter(commit):
                 continue
             
-            # 4. EXCLUDE_FILE_TYPES 포함 여부 필터링
+            # 3. EXCLUDE_FILE_TYPES 포함 여부 필터링
             if any(Path(path).suffix.lower() in self.EXCLUDE_FILE_TYPES for path in commit.file_paths):
                 continue
             
@@ -313,19 +309,6 @@ class CommitCollector:
         self.logger.info(f"필터링 후 커밋 수: {len(filtered_commits)}/{len(commits)}")
         return filtered_commits
     
-    def _passes_stats_filter(self, commit: CommitData) -> bool:
-        """통계 기준 필터링"""
-        stats = commit.stats
-        
-        # 파일 수 범위 확인
-        if not (self.commit_filters.stats.min_files <= stats.files_changed <= self.commit_filters.stats.max_files):
-            return False
-        
-        # 최소 변경 라인 수 확인
-        if stats.total_lines_changed < self.commit_filters.stats.min_lines:
-            return False
-        
-        return True
     
     def _passes_keyword_filter(self, commit: CommitData) -> bool:
         """키워드 기준 필터링"""
@@ -415,7 +398,6 @@ class CommitCollector:
         penalty = 0
         
         for file_path in file_paths:
-            file_lower = file_path.lower()
             file_ext = Path(file_path).suffix.lower()
             file_name = Path(file_path).name.lower()
             

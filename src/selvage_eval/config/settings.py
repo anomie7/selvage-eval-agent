@@ -37,13 +37,6 @@ class TargetRepository(BaseModel):
 
 
 
-class CommitStats(BaseModel):
-    """커밋 통계 필터"""
-    min_files: int = 2
-    max_files: int = 10
-    min_lines: int = 50
-
-
 class MergeHandling(BaseModel):
     """머지 처리 방식"""
     fast_forward: str = "exclude"
@@ -54,7 +47,6 @@ class MergeHandling(BaseModel):
 
 class CommitFilters(BaseModel):
     """커밋 필터링 설정"""
-    stats: CommitStats
     merge_handling: MergeHandling
 
 
