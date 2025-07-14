@@ -4,15 +4,10 @@ import pytest
 from datetime import datetime
 from unittest.mock import Mock, patch
 
-# commit_collection.py 파일에서 직접 import 
-import importlib.util
-spec = importlib.util.spec_from_file_location("commit_collection_module", "/Users/demin_coder/Dev/selvage-eval-agent/src/selvage_eval/commit_collection.py")
-commit_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(commit_module)
-
-CommitData = commit_module.CommitData
-CommitStats = commit_module.CommitStats
-CommitScore = commit_module.CommitScore
+# 개별 파일에서 직접 import
+from selvage_eval.commit_collection.commit_data import CommitData
+from selvage_eval.commit_collection.commit_stats import CommitStats
+from selvage_eval.commit_collection.commit_score import CommitScore
 from selvage_eval.commit_collection.commit_size_category import CommitSizeCategory
 from selvage_eval.commit_collection.diversity_selector import DiversityBasedSelector, CategoryAllocation
 from selvage_eval.config.settings import CommitDiversityConfig, CommitCategoryConfig
@@ -235,8 +230,8 @@ class TestCommitCollectorIntegration:
     @patch('selvage_eval.config.settings.load_commit_diversity_config')
     def test_diversity_selector_initialization(self, mock_load_config):
         """다양성 선택기 초기화 테스트"""
-        # 동일한 방식으로 CommitCollector import
-        CommitCollector = commit_module.CommitCollector
+        # CommitCollector import
+        from selvage_eval.commit_collection.commit_collector import CommitCollector
         from selvage_eval.config.settings import EvaluationConfig
         
         # Mock 설정
@@ -261,8 +256,8 @@ class TestCommitCollectorIntegration:
     
     def test_categorize_commit_integration(self):
         """커밋 분류 통합 테스트"""
-        # 동일한 방식으로 CommitCollector import
-        CommitCollector = commit_module.CommitCollector
+        # CommitCollector import
+        from selvage_eval.commit_collection.commit_collector import CommitCollector
         
         # Mock 설정
         config = Mock()

@@ -9,10 +9,13 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 # 테스트 대상 클래스들
-from selvage_eval.commit_collection import (
-    CommitStats, CommitScore, CommitData, RepositoryMetadata,
-    RepositoryResult, MeaningfulCommitsData, CommitCollector
-)
+from selvage_eval.commit_collection.commit_stats import CommitStats
+from selvage_eval.commit_collection.commit_score import CommitScore
+from selvage_eval.commit_collection.commit_data import CommitData
+from selvage_eval.commit_collection.repository_metadata import RepositoryMetadata
+from selvage_eval.commit_collection.repository_result import RepositoryResult
+from selvage_eval.commit_collection.meaningful_commits_data import MeaningfulCommitsData
+from selvage_eval.commit_collection.commit_collector import CommitCollector
 from selvage_eval.config.settings import EvaluationConfig, TargetRepository, CommitFilters, CommitStats as ConfigCommitStats, MergeHandling
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult

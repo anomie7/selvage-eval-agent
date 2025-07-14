@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from selvage_eval.commit_collection import CommitCollector
+from selvage_eval.commit_collection.commit_collector import CommitCollector
 from selvage_eval.tools.review_executor_tool import ReviewExecutorTool
 from selvage_eval.tools.tool import Tool
 from selvage_eval.tools.tool_executor import ToolExecutor

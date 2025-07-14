@@ -7,7 +7,7 @@ import argparse
 import sys
 import logging
 
-from selvage_eval.commit_collection import CommitCollector
+from selvage_eval.commit_collection.commit_collector import CommitCollector
 from selvage_eval.tools.tool_executor import ToolExecutor
 
 from .config.settings import load_config, get_default_config_path

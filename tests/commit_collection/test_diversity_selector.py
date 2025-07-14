@@ -4,7 +4,9 @@ import pytest
 from datetime import datetime
 
 # 일반적인 import 사용
-from selvage_eval.commit_collection import CommitData, CommitStats, CommitScore
+from selvage_eval.commit_collection.commit_data import CommitData
+from selvage_eval.commit_collection.commit_stats import CommitStats
+from selvage_eval.commit_collection.commit_score import CommitScore
 from selvage_eval.commit_collection.commit_size_category import CommitSizeCategory
 from selvage_eval.commit_collection.diversity_selector import DiversityBasedSelector, CategoryAllocation, SelectionReport
 from selvage_eval.config.settings import CommitDiversityConfig, CommitCategoryConfig, CommitSizeThresholds, FileCorrectionConfig
