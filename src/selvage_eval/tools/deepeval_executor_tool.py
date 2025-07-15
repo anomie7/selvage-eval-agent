@@ -5,10 +5,10 @@ DeepEval을 사용하여 코드 리뷰 품질을 평가하는 도구입니다.
 
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
 from enum import Enum
 
 from pydantic import BaseModel
@@ -47,6 +47,10 @@ class StructuredReviewResponse(BaseModel):
 
 class DeepEvalExecutorTool(Tool):
     """DeepEval 평가 실행 도구"""
+    
+    # 토큰 제한 설정 (Gemini 2.5 Pro 기준)
+    MAX_TOKENS_PER_REQUEST = 100_000  # 안전 마진 포함
+    MAX_BATCH_SIZE = 5  # 배치당 최대 테스트 케이스 수
     
     def __init__(self):
         self.test_case_base_path = "~/Library/selvage-eval/deep_eval_test_case"
@@ -153,18 +157,35 @@ class DeepEvalExecutorTool(Tool):
                 # 평가 실행
                 output_path = session_results_dir / model_name
                 output_path.mkdir(parents=True, exist_ok=True)
-                result = self._run_evaluation(
-                    test_cases_file=test_cases_file,
-                    output_path=output_path,
-                    parallel_workers=parallel_workers,
-                    display_filter=display_filter
-                )
                 
-                # 평가 결과 저장
-                evaluation_results[model_name] = {
-                    "success": result["success"],
-                    "error": result.get("error") if not result["success"] else None
-                }
+                print(f"모델 {model_name} 평가 시작...")
+                try:
+                    result = self._run_evaluation(
+                        test_cases_file=test_cases_file,
+                        output_path=output_path,
+                        parallel_workers=parallel_workers,
+                        display_filter=display_filter
+                    )
+                    
+                    # 평가 결과 저장
+                    evaluation_results[model_name] = {
+                        "success": result["success"],
+                        "error": result.get("error") if not result["success"] else None,
+                        "data": result.get("data", {})
+                    }
+                    
+                    if result["success"]:
+                        print(f"모델 {model_name} 평가 완료")
+                    else:
+                        print(f"모델 {model_name} 평가 실패: {result.get('error', 'Unknown error')}")
+                        
+                except Exception as e:
+                    print(f"모델 {model_name} 평가 중 예외 발생: {str(e)}")
+                    evaluation_results[model_name] = {
+                        "success": False,
+                        "error": f"평가 실행 중 예외: {str(e)}",
+                        "data": {}
+                    }
             
             return ToolResult(
                 success=True,
@@ -204,6 +225,76 @@ class DeepEvalExecutorTool(Tool):
         
         return {"valid": True, "message": "환경 설정 완료"}
     
+    def _estimate_token_count(self, text: str) -> int:
+        """텍스트의 토큰 수를 추정합니다 (대략적인 계산)"""
+        # 대략적인 토큰 수 계산 (영어 기준 4글자당 1토큰, 한국어 기준 2글자당 1토큰)
+        english_chars = sum(1 for c in text if ord(c) < 128)
+        korean_chars = len(text) - english_chars
+        return (english_chars // 4) + (korean_chars // 2)
+    
+    def _split_test_cases_by_token_limit(self, test_cases: List[Any], max_tokens: int) -> List[List[Any]]:
+        """테스트 케이스를 토큰 제한에 따라 배치로 분할"""
+        batches = []
+        current_batch = []
+        current_tokens = 0
+        
+        for test_case in test_cases:
+            # 테스트 케이스의 토큰 수 계산
+            test_case_text = str(test_case.input) + str(test_case.actual_output)
+            test_case_tokens = self._estimate_token_count(test_case_text)
+            
+            # 단일 테스트 케이스가 토큰 제한을 초과하는 경우 별도 배치로 처리
+            if test_case_tokens > max_tokens:
+                print(f"⚠️  테스트 케이스가 토큰 제한({max_tokens})을 초과합니다 ({test_case_tokens} 토큰). 별도 배치로 처리합니다.")
+                # 현재 배치가 있으면 먼저 완료
+                if current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_tokens = 0
+                # 큰 테스트 케이스를 혼자서 배치로 생성
+                batches.append([test_case])
+                continue
+            
+            # 현재 배치에 추가할 수 있는지 확인
+            if current_tokens + test_case_tokens > max_tokens and current_batch:
+                # 현재 배치를 완료하고 새 배치 시작
+                batches.append(current_batch)
+                current_batch = [test_case]
+                current_tokens = test_case_tokens
+            else:
+                current_batch.append(test_case)
+                current_tokens += test_case_tokens
+                
+            # 배치 크기 제한 확인
+            if len(current_batch) >= self.MAX_BATCH_SIZE:
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+        
+        # 마지막 배치 추가
+        if current_batch:
+            batches.append(current_batch)
+            
+        return batches
+    
+    def _retry_with_backoff(self, func, max_retries: int = 3, initial_delay: float = 1.0):
+        """지수 백오프를 사용한 재시도 로직"""
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise e
+                
+                # API 할당량 오류인 경우 더 긴 대기
+                if "quota" in str(e).lower() or "rate" in str(e).lower():
+                    delay = initial_delay * (2 ** attempt) * 3  # 할당량 오류 시 더 긴 대기 (3분, 6분, 12분)
+                else:
+                    delay = initial_delay * (2 ** attempt)
+                
+                print(f"재시도 {attempt + 1}/{max_retries} - {delay:.1f}초 후 재시도: {str(e)}")
+                time.sleep(delay)
+    
     def _run_evaluation(self, test_cases_file: Path, 
                        output_path: Path,
                        parallel_workers: int, 
@@ -232,6 +323,13 @@ class DeepEvalExecutorTool(Tool):
             # 메트릭 생성
             metrics = self._create_metrics()
             
+            # 테스트 케이스 분할 처리
+            batches = self._split_test_cases_by_token_limit(test_cases, self.MAX_TOKENS_PER_REQUEST)
+            print(f"총 {len(test_cases)}개 테스트 케이스를 {len(batches)}개 배치로 분할")
+            
+            # 병렬 처리 수 조정 (토큰 제한 고려)
+            adjusted_parallel_workers = min(parallel_workers, 1)  # API 안정성을 위해 1로 제한
+            
             # DisplayConfig 설정
             display_config = DisplayConfig(
                 display_option=self._convert_display_filter_to_enum(display_filter, TestRunResultDisplay),
@@ -241,20 +339,45 @@ class DeepEvalExecutorTool(Tool):
             
             # AsyncConfig 설정
             async_config = AsyncConfig(
-                max_concurrent=parallel_workers
+                max_concurrent=adjusted_parallel_workers
             )
             
-            # DeepEval 평가 실행
-            evaluate(
-                test_cases=test_cases,
-                metrics=metrics,
-                display_config=display_config,
-                async_config=async_config
-            )
+            # 각 배치별로 평가 실행
+            total_processed = 0
+            for i, batch in enumerate(batches):
+                print(f"배치 {i+1}/{len(batches)} 처리 중 ({len(batch)}개 테스트 케이스)")
+                
+                # 배치 평가 실행 (재시도 로직 적용)
+                def run_batch_evaluation():
+                    return evaluate(
+                        test_cases=batch,
+                        metrics=metrics,
+                        display_config=display_config,
+                        async_config=async_config
+                    )
+                
+                try:
+                    self._retry_with_backoff(run_batch_evaluation, max_retries=3, initial_delay=60.0)
+                    total_processed += len(batch)
+                    print(f"배치 {i+1} 완료")
+                    
+                    # 배치 간 딜레이 (API 안정성)
+                    if i < len(batches) - 1:
+                        time.sleep(180.0)  # 3분 대기
+                        
+                except Exception as e:
+                    print(f"배치 {i+1} 실패: {str(e)}")
+                    # 부분 성공이라도 계속 진행
+                    continue
             
             return {
                 "success": True,
-                "data": {"executed": True, "test_cases_count": len(test_cases)}
+                "data": {
+                    "executed": True, 
+                    "test_cases_count": len(test_cases),
+                    "processed_count": total_processed,
+                    "batches_count": len(batches)
+                }
             }
                 
         except Exception as e:

@@ -329,3 +329,37 @@ def get_commit_diversity_config_path() -> str:
     """커밋 다양성 설정 파일 경로 반환"""
     config_dir = Path(__file__).parent
     return str(config_dir / "commit-collection-config.yml")
+
+
+def get_tech_stack_mapping(config_path: Optional[str] = None) -> Dict[str, str]:
+    """설정 파일에서 tech_stack 매핑을 가져옵니다
+    
+    Args:
+        config_path: 설정 파일 경로 (기본값: 자동 탐지)
+        
+    Returns:
+        Dict[str, str]: {repository_name: tech_stack_display_name} 매핑
+    """
+    try:
+        if config_path is None:
+            config_path = get_default_config_path()
+        
+        config = load_config(config_path)
+        
+        # 저장소명 -> 기술스택 매핑 생성 (설정 파일의 tech_stack을 직접 사용)
+        mapping = {}
+        for repo in config.target_repositories:
+            mapping[repo.name] = repo.tech_stack
+        
+        logger.debug(f"Tech stack mapping loaded: {mapping}")
+        return mapping
+        
+    except Exception as e:
+        logger.error(f"Failed to load tech stack mapping: {e}")
+        # 기본 매핑 반환
+        return {
+            'cline': 'typescript',
+            'fastapi': 'python',
+            'ecommerce-microservices': 'Java/Spring',
+            'ktor': 'Kotlin/JPA'
+        }

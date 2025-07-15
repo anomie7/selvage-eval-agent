@@ -12,29 +12,29 @@ target_repositories:
     description: "typescript로 구현된 coding assistant"
     access_mode: readonly  # 읽기 전용 접근
       
-  - name: selvage-deprecated
-    path: /Users/demin_coder/Dev/selvage-deprecated
+  - name: fastapi
+    path: /Users/demin_coder/Dev/fastapi
     tech_stack: python
-    description: "LLM 기반 코드 리뷰 도구 selvage 이전 버전 commit history"
+    description: "파이썬 기반 서버 프레임워크"
     access_mode: readonly  # 읽기 전용 접근
       
   - name: ecommerce-microservices
     path: /Users/demin_coder/Dev/ecommerce-microservices
-    tech_stack: java_spring
+    tech_stack: Java/Spring
     description: "java, spring, jpa로 구현된 MSA 서버 애플리케이션"
     access_mode: readonly  # 읽기 전용 접근
       
-  - name: kotlin-realworld
-    path: /Users/demin_coder/Dev/kotlin-realworld
-    tech_stack: kotlin_jpa
-    description: "java, kotlin, jpa로 구현된 호텔 예약 서버 애플리케이션"
+  - name: ktor
+    path: /Users/demin_coder/Dev/ktor
+    tech_stack: Kotlin/JPA
+    description: "kotlin, jpa로 구현된 호텔 예약 서버 애플리케이션"
     access_mode: readonly  # 읽기 전용 접근
 
 review_models:
-  - "gemini-2.5-pro"
-  - "gemini-2.5-flash"
-  - "o3"
-  - "o4-mini-high"
+  # - "gemini-2.5-pro"
+  # - "gemini-2.5-flash"
+  # - "o3"
+  # - "o4-mini-high"
   # - "claude-sonnet-4-thinking"
   - "claude-sonnet-4"
 
@@ -44,7 +44,7 @@ commit_filters:
     conflict_resolution: include
     squash_merge: include
     feature_branch: conditional  # 변경량 기준
-commits_per_repo: 20
+commits_per_repo: 10
 
 workflow:
   skip_existing:
