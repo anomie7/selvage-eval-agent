@@ -363,7 +363,7 @@ class DeepEvalExecutorTool(Tool):
                     
                     # 배치 간 딜레이 (API 안정성)
                     if i < len(batches) - 1:
-                        time.sleep(180.0)  # 3분 대기
+                        time.sleep(120.0)  # 2분 대기
                         
                 except Exception as e:
                     print(f"배치 {i+1} 실패: {str(e)}")

@@ -219,8 +219,8 @@ class ReviewExecutorTool(Tool):
                 print(f"Selvage 리뷰 실행 실패: {commit_id} (모델: {model}) - {error_msg}")
                 
                 if attempt < max_retries - 1:
-                    print(f"60초 후 재시도 ({attempt + 1}/{max_retries})...")
-                    time.sleep(60)
+                    print(f"90초 후 재시도 ({attempt + 1}/{max_retries})...")
+                    time.sleep(90)
                 else:
                     print(f"최대 재시도 횟수 초과: {commit_id} (모델: {model})")
                     return False
