@@ -44,7 +44,7 @@ commit_filters:
     conflict_resolution: include
     squash_merge: include
     feature_branch: conditional  # 변경량 기준
-commits_per_repo: 10
+commits_per_repo: 15
 
 workflow:
   skip_existing:

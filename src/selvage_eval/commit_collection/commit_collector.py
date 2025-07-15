@@ -238,6 +238,12 @@ class CommitCollector:
                 additional_adjustments=0
             )
             
+            # 커밋 크기 카테고리 계산
+            size_category = CommitSizeCategory.categorize_by_lines(
+                stats.total_lines_changed,
+                stats.files_changed
+            )
+            
             return CommitData(
                 id=commit_id,
                 message=message,
@@ -245,7 +251,8 @@ class CommitCollector:
                 date=commit_date,
                 stats=stats,
                 score=initial_score,
-                file_paths=file_paths
+                file_paths=file_paths,
+                size_category=size_category
             )
             
         except Exception as e:
@@ -390,7 +397,8 @@ class CommitCollector:
             date=commit.date,
             stats=commit.stats,
             score=new_score,
-            file_paths=commit.file_paths
+            file_paths=commit.file_paths,
+            size_category=commit.size_category
         )
     
     def _calculate_file_type_penalty(self, file_paths: List[str]) -> int:

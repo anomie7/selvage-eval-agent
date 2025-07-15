@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import os
 
-from selvage_eval.llm.gemini_client import GeminiClient
+from selvage_eval.llm.openrouter_client import OpenRouterClient
 
 from .deepeval_log_parser import DeepEvalLogParser
 from .metric_aggregator import MetricAggregator
@@ -801,23 +801,22 @@ class DeepEvalAnalysisEngine:
         return "\n".join(lines)
     
     def _init_gemini_client(self):
-        """Gemini 클라이언트 초기화"""
+        """OpenRouter 클라이언트 초기화"""
         try:
-            api_key = os.getenv('GEMINI_API_KEY')
+            api_key = os.getenv('OPENROUTER_API_KEY')
             if not api_key:
-                logger.warning("GEMINI_API_KEY가 설정되지 않았습니다. 실패 이유 번역이 비활성화됩니다.")
+                logger.warning("OPENROUTER_API_KEY가 설정되지 않았습니다. 실패 이유 번역이 비활성화됩니다.")
                 self.gemini_client = None
                 self.gemini_pro_client = None
                 return
             
-            # 번역용 Flash 클라이언트
-            self.gemini_client = GeminiClient(api_key=api_key, model_name="gemini-2.5-flash")
-            # AI 분석용 Pro 클라이언트
-            self.gemini_pro_client = GeminiClient(api_key=api_key, model_name="gemini-2.5-pro")
-            logger.info("Gemini 클라이언트 초기화 완료 (Flash + Pro)")
+            # 단일 OpenRouter 클라이언트 초기화
+            self.gemini_client = OpenRouterClient(api_key=api_key)
+            self.gemini_pro_client = OpenRouterClient(api_key=api_key)
+            logger.info("OpenRouter 클라이언트 초기화 완료")
             
         except Exception as e:
-            logger.error(f"Gemini 클라이언트 초기화 실패: {e}")
+            logger.error(f"OpenRouter 클라이언트 초기화 실패: {e}")
             self.gemini_client = None
             self.gemini_pro_client = None
     
@@ -844,7 +843,8 @@ class DeepEvalAnalysisEngine:
             
             response = self.gemini_client.query(
                 messages=messages,
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                model_name="gemini-2.5-flash"
             )
             
             translated = response.strip()
@@ -892,6 +892,7 @@ class DeepEvalAnalysisEngine:
             results = self.gemini_client.batch_query(
                 batch_requests=batch_requests,
                 system_instruction=system_instruction,
+                model_name="gemini-2.5-flash",
                 max_workers=5  # 동시 처리 제한
             )
             
@@ -1021,7 +1022,8 @@ AI 코드 리뷰 도구의 평가 결과를 분석하여 개발팀이 실무에�
             
             analysis_result = self.gemini_pro_client.query(
                 messages=messages,
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                model_name="gemini-2.5-pro"
             )
             
             if analysis_result:
@@ -1239,7 +1241,8 @@ AI 코드 리뷰 도구의 여러 모델별 평가 결과를 종합하여 전체
             
             comprehensive_analysis = self.gemini_pro_client.query(
                 messages=messages,
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                model_name="gemini-2.5-pro"
             )
             
             if comprehensive_analysis:
