@@ -396,7 +396,7 @@ class DeepEvalExecutorTool(Tool):
             # DeepEval을 가져올 수 없는 경우 빈 리스트 반환
             return []
         
-        model = "gpt-4.1"
+        model = "gemini-2.5-pro"
         
         # Correctness GEval - 코드 리뷰 정확성 평가
         correctness = GEval(

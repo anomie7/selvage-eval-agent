@@ -208,7 +208,7 @@ class ReviewExecutorTool(Tool):
                                    f"--model {model} --log-dir {review_log_dir}"),
                         "cwd": repo_path,
                         "capture_output": True,
-                        "timeout": 600
+                        "timeout": 1200
                     }
                 )
                 
