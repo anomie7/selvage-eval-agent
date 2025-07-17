@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 from selvage_eval.tools.review_executor_tool import ReviewExecutorTool
-from selvage_eval.commit_collection import MeaningfulCommitsData
+from selvage_eval.commit_collection.meaningful_commits_data import MeaningfulCommitsData
 
 TEST_REVIEW_MODEL = "gemini-2.5-flash"
 

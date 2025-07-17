@@ -4,11 +4,12 @@
 """
 
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 from .deepeval_log_parser import TestCaseResult
 from .metric_aggregator import MetricAggregator
+from ..config.settings import get_tech_stack_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +17,9 @@ logger = logging.getLogger(__name__)
 class TechStackAnalyzer:
     """기술스택별 모델 성능 분석기"""
     
-    def __init__(self):
-        # 기술스택 매핑 정의
-        self.tech_stack_mapping = {
-            'cline': 'TypeScript/JavaScript',
-            'ecommerce-microservices': 'Java/Spring',
-            'kotlin-realworld': 'Kotlin/JPA',
-            'selvage-deprecated': 'Python'
-        }
+    def __init__(self, config_path: Optional[str] = None):
+        # 설정 파일에서 기술스택 매핑 로드
+        self.tech_stack_mapping = get_tech_stack_mapping(config_path)
         self.aggregator = MetricAggregator()
     
     def analyze_tech_stack_performance(self, 
@@ -225,7 +221,6 @@ class TechStackAnalyzer:
         
         best_model = performance.get('best_model')
         performance_gap = performance.get('performance_gap', {})
-        model_performance = performance.get('model_performance', {})
         
         # 최고 성능 모델 추천
         if best_model and best_model['name']:

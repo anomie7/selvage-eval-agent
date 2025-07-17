@@ -5,7 +5,7 @@ Pydantic을 사용하여 타입 안전성과 검증을 보장합니다.
 """
 
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -37,13 +37,6 @@ class TargetRepository(BaseModel):
 
 
 
-class CommitStats(BaseModel):
-    """커밋 통계 필터"""
-    min_files: int = 2
-    max_files: int = 10
-    min_lines: int = 50
-
-
 class MergeHandling(BaseModel):
     """머지 처리 방식"""
     fast_forward: str = "exclude"
@@ -54,7 +47,6 @@ class MergeHandling(BaseModel):
 
 class CommitFilters(BaseModel):
     """커밋 필터링 설정"""
-    stats: CommitStats
     merge_handling: MergeHandling
 
 
@@ -123,6 +115,60 @@ class LoggingConfig(BaseModel):
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 
+class CommitCategoryConfig(BaseModel):
+    """커밋 카테고리별 설정"""
+    target_ratio: float = Field(ge=0.0, le=1.0)  # 목표 비율 (0.0-1.0)
+    min_count: int = Field(ge=0)                  # 최소 선택 개수
+    max_count: int = Field(ge=0)                  # 최대 선택 개수
+    score_boost: int = Field(ge=0)                # 다양성을 위한 점수 보정
+    description: Optional[str] = None             # 카테고리 설명
+
+
+class CommitSizeThresholds(BaseModel):
+    """커밋 크기 분류 임계값"""
+    extra_small_max: int = 5
+    small_max: int = 46
+    medium_max: int = 106
+    large_max: int = 166
+
+
+class FileCorrectionConfig(BaseModel):
+    """파일 수 보정 설정"""
+    large_file_threshold: int = 11      # 대규모 파일 수 임계값
+    single_file_large_lines: int = 100  # 단일 파일 대규모 라인 임계값
+
+
+class SelectionAlgorithmConfig(BaseModel):
+    """선택 알고리즘 설정"""
+    allocation_method: str = "proportional"    # proportional, fixed, adaptive
+    shortage_handling: str = "redistribute"    # redistribute, skip, fallback
+    surplus_strategy: str = "quality_first"    # quality_first, maintain_ratio, random
+
+
+class QualityScoringConfig(BaseModel):
+    """품질 점수 설정"""
+    diversity_weight: float = Field(ge=0.0, le=1.0, default=0.3)
+    min_quality_scores: Dict[str, int] = Field(default_factory=dict)
+
+
+class DebugConfig(BaseModel):
+    """디버깅 설정"""
+    log_category_distribution: bool = True
+    log_selection_details: bool = True
+    export_selection_report: bool = True
+
+
+class CommitDiversityConfig(BaseModel):
+    """커밋 다양성 설정"""
+    enabled: bool = True
+    size_thresholds: CommitSizeThresholds = Field(default_factory=CommitSizeThresholds)
+    file_correction: FileCorrectionConfig = Field(default_factory=FileCorrectionConfig)
+    categories: Dict[str, CommitCategoryConfig] = Field(default_factory=dict)
+    selection_algorithm: SelectionAlgorithmConfig = Field(default_factory=SelectionAlgorithmConfig)
+    quality_scoring: QualityScoringConfig = Field(default_factory=QualityScoringConfig)
+    debug: DebugConfig = Field(default_factory=DebugConfig)
+
+
 class EvaluationConfig(BaseModel):
     """전체 평가 설정"""
     agent_model: str = "gemini-2.5-flash"
@@ -131,6 +177,7 @@ class EvaluationConfig(BaseModel):
     review_models: List[str]
     commit_filters: CommitFilters
     commits_per_repo: int = 5
+    commit_diversity: Optional[CommitDiversityConfig] = None
     workflow: WorkflowConfig
     selvage: SelvageConfig
     deepeval: Optional[DeepEvalConfig] = None
@@ -181,6 +228,48 @@ class EvaluationConfig(BaseModel):
             logger.debug(f"Created directory: {dir_path}")
 
 
+def load_commit_diversity_config(config_path: Optional[str] = None) -> CommitDiversityConfig:
+    """커밋 다양성 설정 파일 로드
+    
+    Args:
+        config_path: 설정 파일 경로 (기본값: commit-collection-config.yml)
+        
+    Returns:
+        로드된 커밋 다양성 설정 객체
+    """
+    if config_path is None:
+        # 기본 설정 파일 경로
+        config_dir = Path(__file__).parent
+        config_path = str(config_dir / "commit-collection-config.yml")
+    
+    try:
+        if not os.path.exists(config_path):
+            logger.warning(f"Commit diversity config not found: {config_path}, using defaults")
+            return CommitDiversityConfig()
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = yaml.safe_load(f)
+        
+        # commit_diversity 섹션만 추출
+        diversity_data = config_data.get('commit_diversity', {})
+        
+        # 추가 설정들도 추출
+        if 'commits_per_repo' in config_data:
+            diversity_data['commits_per_repo'] = config_data['commits_per_repo']
+        
+        config = CommitDiversityConfig(**diversity_data)
+        logger.info(f"Loaded commit diversity config from: {config_path}")
+        
+        return config
+        
+    except yaml.YAMLError as e:
+        logger.error(f"Invalid YAML format in commit diversity config: {e}")
+        return CommitDiversityConfig()  # 기본값 사용
+    except Exception as e:
+        logger.error(f"Failed to load commit diversity config: {e}")
+        return CommitDiversityConfig()  # 기본값 사용
+
+
 def load_config(config_path: str) -> EvaluationConfig:
     """설정 파일 로드
     
@@ -202,6 +291,11 @@ def load_config(config_path: str) -> EvaluationConfig:
             config_data = yaml.safe_load(f)
         
         config = EvaluationConfig(**config_data)
+        
+        # 커밋 다양성 설정 로드 및 통합
+        if config.commit_diversity is None:
+            config.commit_diversity = load_commit_diversity_config()
+        
         logger.info(f"Loaded configuration from: {config_path}")
         
         # 출력 디렉토리 생성
@@ -229,3 +323,43 @@ def get_default_config_path() -> str:
         return str(package_config)
     
     raise FileNotFoundError("Default config file not found")
+
+
+def get_commit_diversity_config_path() -> str:
+    """커밋 다양성 설정 파일 경로 반환"""
+    config_dir = Path(__file__).parent
+    return str(config_dir / "commit-collection-config.yml")
+
+
+def get_tech_stack_mapping(config_path: Optional[str] = None) -> Dict[str, str]:
+    """설정 파일에서 tech_stack 매핑을 가져옵니다
+    
+    Args:
+        config_path: 설정 파일 경로 (기본값: 자동 탐지)
+        
+    Returns:
+        Dict[str, str]: {repository_name: tech_stack_display_name} 매핑
+    """
+    try:
+        if config_path is None:
+            config_path = get_default_config_path()
+        
+        config = load_config(config_path)
+        
+        # 저장소명 -> 기술스택 매핑 생성 (설정 파일의 tech_stack을 직접 사용)
+        mapping = {}
+        for repo in config.target_repositories:
+            mapping[repo.name] = repo.tech_stack
+        
+        logger.debug(f"Tech stack mapping loaded: {mapping}")
+        return mapping
+        
+    except Exception as e:
+        logger.error(f"Failed to load tech stack mapping: {e}")
+        # 기본 매핑 반환
+        return {
+            'cline': 'typescript',
+            'fastapi': 'python',
+            'ecommerce-microservices': 'Java/Spring',
+            'ktor': 'Kotlin/JPA'
+        }

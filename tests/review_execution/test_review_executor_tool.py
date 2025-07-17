@@ -8,10 +8,12 @@ from pathlib import Path
 # 테스트 대상 클래스들
 from selvage_eval.tools.review_executor_tool import ReviewExecutorTool
 from selvage_eval.review_execution_summary import ReviewExecutionSummary
-from selvage_eval.commit_collection import (
-    CommitStats, CommitScore, CommitData, RepositoryMetadata,
-    RepositoryResult, MeaningfulCommitsData
-)
+from selvage_eval.commit_collection.commit_stats import CommitStats
+from selvage_eval.commit_collection.commit_score import CommitScore
+from selvage_eval.commit_collection.commit_data import CommitData
+from selvage_eval.commit_collection.repository_metadata import RepositoryMetadata
+from selvage_eval.commit_collection.repository_result import RepositoryResult
+from selvage_eval.commit_collection.meaningful_commits_data import MeaningfulCommitsData
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult
 

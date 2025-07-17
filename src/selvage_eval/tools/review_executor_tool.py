@@ -198,21 +198,32 @@ class ReviewExecutorTool(Tool):
             review_log_dir = output_path / repo_name / commit_id / model
             review_log_dir.mkdir(parents=True, exist_ok=True)
             
-            # 4. Selvage 리뷰 실행
-            review_result = self.tool_executor.execute_tool_call(
-                "execute_safe_command",
-                {
-                    "command": (f"selvage review --no-print --skip-cache --target-commit {parent_commit_id} "
-                               f"--model {model} --log-dir {review_log_dir}"),
-                    "cwd": repo_path,
-                    "capture_output": True,
-                    "timeout": 300
-                }
-            )
-            
-            if not review_result.success:
-                print(f"Selvage 리뷰 실행 실패: {commit_id} (모델: {model})")
-                return False
+            # 4. Selvage 리뷰 실행 (재시도 로직 포함)
+            max_retries = 3
+            for attempt in range(max_retries):
+                review_result = self.tool_executor.execute_tool_call(
+                    "execute_safe_command",
+                    {
+                        "command": (f"selvage review --no-print --skip-cache --target-commit {parent_commit_id} "
+                                   f"--model {model} --log-dir {review_log_dir}"),
+                        "cwd": repo_path,
+                        "capture_output": True,
+                        "timeout": 1200
+                    }
+                )
+                
+                if review_result.success:
+                    break
+                
+                error_msg = review_result.error_message or "알 수 없는 오류"
+                print(f"Selvage 리뷰 실행 실패: {commit_id} (모델: {model}) - {error_msg}")
+                
+                if attempt < max_retries - 1:
+                    print(f"90초 후 재시도 ({attempt + 1}/{max_retries})...")
+                    time.sleep(90)
+                else:
+                    print(f"최대 재시도 횟수 초과: {commit_id} (모델: {model})")
+                    return False
             
             print(f"리뷰 완료: {repo_name}/{commit_id} (모델: {model})")
             return True

@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from selvage_eval.commit_collection import CommitCollector
+from selvage_eval.commit_collection.commit_collector import CommitCollector
 from selvage_eval.tools.review_executor_tool import ReviewExecutorTool
 from selvage_eval.tools.tool import Tool
 from selvage_eval.tools.tool_executor import ToolExecutor
@@ -1081,7 +1081,7 @@ class SelvageEvaluationAgent:
                     # Claude Sonnet-4-Thinking 모델 rate limit 처리
                     if model == "claude-sonnet-4-thinking":
                         logger.info("Claude Sonnet-4-Thinking rate limit 처리를 위해 60초 대기 중...")
-                        time.sleep(60)
+                        time.sleep(180)
                         logger.info("Rate limit 대기 완료")
                     
                 except Exception as model_error:

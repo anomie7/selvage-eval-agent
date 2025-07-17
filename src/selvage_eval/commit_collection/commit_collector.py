@@ -1,195 +1,20 @@
-"""커밋 수집 및 필터링 구현
-
-본 모듈은 Selvage 평가를 위한 의미있는 커밋 수집 및 필터링 기능을 제공합니다.
-구현 문서 docs/implementation/commit-collection-implementation.md 의 명세를 따릅니다.
-"""
-
-from dataclasses import dataclass, asdict
-from typing import List, Optional, Dict, Any, Set, Tuple
-from datetime import datetime, timedelta
-from pathlib import Path
-import json
 import logging
 import re
 import time
-
-from selvage_eval.config.settings import EvaluationConfig, TargetRepository
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Optional
+from .commit_stats import CommitStats
+from .commit_score import CommitScore
+from .commit_data import CommitData
+from .repository_metadata import RepositoryMetadata
+from .repository_result import RepositoryResult
+from .meaningful_commits_data import MeaningfulCommitsData
+from selvage_eval.config.settings import EvaluationConfig, TargetRepository, load_commit_diversity_config
 from selvage_eval.tools.tool_executor import ToolExecutor
 from selvage_eval.tools.tool_result import ToolResult
-
-
-@dataclass
-class CommitStats:
-    """커밋 변경 통계"""
-    files_changed: int
-    lines_added: int
-    lines_deleted: int
-    
-    @property
-    def total_lines_changed(self) -> int:
-        """총 변경 라인 수"""
-        return self.lines_added + self.lines_deleted
-    
-    @property
-    def addition_ratio(self) -> float:
-        """추가 라인 비율 (0.0 ~ 1.0)"""
-        total = self.total_lines_changed
-        return self.lines_added / total if total > 0 else 0.0
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CommitStats':
-        """딕셔너리에서 CommitStats 객체 생성"""
-        return cls(
-            files_changed=data['files_changed'],
-            lines_added=data['lines_added'],
-            lines_deleted=data['lines_deleted']
-        )
-
-
-@dataclass
-class CommitScore:
-    """커밋 점수 상세 정보"""
-    total_score: int
-    file_type_penalty: int
-    scale_appropriateness_score: int
-    commit_characteristics_score: int
-    time_weight_score: int
-    additional_adjustments: int
-    
-    def __post_init__(self):
-        """점수 범위 검증"""
-        self.total_score = max(0, min(100, self.total_score))
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CommitScore':
-        """딕셔너리에서 CommitScore 객체 생성"""
-        return cls(
-            total_score=data['total_score'],
-            file_type_penalty=data['file_type_penalty'],
-            scale_appropriateness_score=data['scale_appropriateness_score'],
-            commit_characteristics_score=data['commit_characteristics_score'],
-            time_weight_score=data['time_weight_score'],
-            additional_adjustments=data['additional_adjustments']
-        )
-
-
-@dataclass
-class CommitData:
-    """개별 커밋 데이터"""
-    id: str
-    message: str
-    author: str
-    date: datetime
-    stats: CommitStats
-    score: CommitScore
-    file_paths: List[str]
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """JSON 직렬화를 위한 딕셔너리 변환"""
-        data = asdict(self)
-        data['date'] = self.date.isoformat()
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CommitData':
-        """딕셔너리에서 CommitData 객체 생성"""
-        return cls(
-            id=data['id'],
-            message=data['message'],
-            author=data['author'],
-            date=datetime.fromisoformat(data['date']),
-            stats=CommitStats.from_dict(data['stats']),
-            score=CommitScore.from_dict(data['score']),
-            file_paths=data['file_paths']
-        )
-
-
-@dataclass
-class RepositoryMetadata:
-    """저장소 메타데이터"""
-    total_commits: int
-    filtered_commits: int
-    selected_commits: int
-    filter_timestamp: datetime
-    processing_time_seconds: float
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """JSON 직렬화를 위한 딕셔너리 변환"""
-        data = asdict(self)
-        data['filter_timestamp'] = self.filter_timestamp.isoformat()
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'RepositoryMetadata':
-        """딕셔너리에서 RepositoryMetadata 객체 생성"""
-        return cls(
-            total_commits=data['total_commits'],
-            filtered_commits=data['filtered_commits'],
-            selected_commits=data['selected_commits'],
-            filter_timestamp=datetime.fromisoformat(data['filter_timestamp']),
-            processing_time_seconds=data['processing_time_seconds']
-        )
-
-
-@dataclass
-class RepositoryResult:
-    """저장소별 커밋 수집 결과"""
-    repo_name: str
-    repo_path: str
-    commits: List[CommitData]
-    metadata: RepositoryMetadata
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """JSON 직렬화를 위한 딕셔너리 변환"""
-        return {
-            'repo_name': self.repo_name,
-            'repo_path': self.repo_path,
-            'commits': [commit.to_dict() for commit in self.commits],
-            'metadata': self.metadata.to_dict()
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'RepositoryResult':
-        """딕셔너리에서 RepositoryResult 객체 생성"""
-        return cls(
-            repo_name=data['repo_name'],
-            repo_path=data['repo_path'],
-            commits=[CommitData.from_dict(commit_data) for commit_data in data['commits']],
-            metadata=RepositoryMetadata.from_dict(data['metadata'])
-        )
-
-
-@dataclass
-class MeaningfulCommitsData:
-    """전체 커밋 수집 결과"""
-    repositories: List[RepositoryResult]
-    
-    def save_to_json(self, filepath: str) -> None:
-        """JSON 파일로 저장"""
-        data = {
-            'repositories': [repo.to_dict() for repo in self.repositories]
-        }
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    
-    @property
-    def total_commits(self) -> int:
-        """전체 선별된 커밋 수"""
-        return sum(len(repo.commits) for repo in self.repositories)
-    
-    @classmethod
-    def from_json(cls, filepath: str) -> 'MeaningfulCommitsData':
-        """JSON 파일에서 MeaningfulCommitsData 객체 생성"""
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        repositories = [
-            RepositoryResult.from_dict(repo_data) 
-            for repo_data in data['repositories']
-        ]
-        
-        return cls(repositories=repositories)
-
+from selvage_eval.commit_collection.commit_size_category import CommitSizeCategory
+from selvage_eval.commit_collection.diversity_selector import DiversityBasedSelector
 
 class CommitCollector:
     """의미있는 커밋 수집 및 필터링 클래스"""
@@ -272,6 +97,15 @@ class CommitCollector:
         self.commits_per_repo = config.commits_per_repo
         self.tool_executor = tool_executor
         self.logger = logging.getLogger(__name__)
+        
+        # 커밋 다양성 설정 로드 및 초기화
+        if config.commit_diversity is None:
+            config.commit_diversity = load_commit_diversity_config()
+        
+        self.diversity_config = config.commit_diversity
+        self.diversity_selector = DiversityBasedSelector(
+            self.diversity_config
+        ) if self.diversity_config.enabled else None
     
     def collect_commits(self) -> MeaningfulCommitsData:
         """
@@ -291,7 +125,7 @@ class CommitCollector:
                 commits = self._collect_repo_commits(repo_config)
                 filtered_commits = self._filter_commits(commits)
                 scored_commits = [self._score_commits(commit) for commit in filtered_commits]
-                selected_commits = self._select_top_commits(
+                selected_commits = self._select_diverse_commits(
                     scored_commits, 
                     self.commits_per_repo
                 )
@@ -404,6 +238,12 @@ class CommitCollector:
                 additional_adjustments=0
             )
             
+            # 커밋 크기 카테고리 계산
+            size_category = CommitSizeCategory.categorize_by_lines(
+                stats.total_lines_changed,
+                stats.files_changed
+            )
+            
             return CommitData(
                 id=commit_id,
                 message=message,
@@ -411,7 +251,8 @@ class CommitCollector:
                 date=commit_date,
                 stats=stats,
                 score=initial_score,
-                file_paths=file_paths
+                file_paths=file_paths,
+                size_category=size_category
             )
             
         except Exception as e:
@@ -454,23 +295,19 @@ class CommitCollector:
         )
     
     def _filter_commits(self, commits: List[CommitData]) -> List[CommitData]:
-        """키워드 및 통계 기준으로 커밋 필터링"""
+        """키워드 기준으로 커밋 필터링"""
         filtered_commits: List[CommitData] = []
         
         for commit in commits:
-            # 1. 통계 기준 필터링
-            if not self._passes_stats_filter(commit):
-                continue
-            
-            # 2. 키워드 기준 필터링
+            # 1. 키워드 기준 필터링
             if not self._passes_keyword_filter(commit):
                 continue
             
-            # 3. 머지 커밋 특별 처리
+            # 2. 머지 커밋 특별 처리
             if not self._passes_merge_filter(commit):
                 continue
             
-            # 4. EXCLUDE_FILE_TYPES 포함 여부 필터링
+            # 3. EXCLUDE_FILE_TYPES 포함 여부 필터링
             if any(Path(path).suffix.lower() in self.EXCLUDE_FILE_TYPES for path in commit.file_paths):
                 continue
             
@@ -479,19 +316,6 @@ class CommitCollector:
         self.logger.info(f"필터링 후 커밋 수: {len(filtered_commits)}/{len(commits)}")
         return filtered_commits
     
-    def _passes_stats_filter(self, commit: CommitData) -> bool:
-        """통계 기준 필터링"""
-        stats = commit.stats
-        
-        # 파일 수 범위 확인
-        if not (self.commit_filters.stats.min_files <= stats.files_changed <= self.commit_filters.stats.max_files):
-            return False
-        
-        # 최소 변경 라인 수 확인
-        if stats.total_lines_changed < self.commit_filters.stats.min_lines:
-            return False
-        
-        return True
     
     def _passes_keyword_filter(self, commit: CommitData) -> bool:
         """키워드 기준 필터링"""
@@ -573,7 +397,8 @@ class CommitCollector:
             date=commit.date,
             stats=commit.stats,
             score=new_score,
-            file_paths=commit.file_paths
+            file_paths=commit.file_paths,
+            size_category=commit.size_category
         )
     
     def _calculate_file_type_penalty(self, file_paths: List[str]) -> int:
@@ -581,7 +406,6 @@ class CommitCollector:
         penalty = 0
         
         for file_path in file_paths:
-            file_lower = file_path.lower()
             file_ext = Path(file_path).suffix.lower()
             file_name = Path(file_path).name.lower()
             
@@ -725,6 +549,132 @@ class CommitCollector:
             self.logger.info(f"점수 범위: {min(scores):.1f} ~ {max(scores):.1f}")
         
         return selected
+    
+    def _categorize_commit(self, commit: CommitData) -> CommitSizeCategory:
+        """라인 수 우선 + 파일 수 보정 방식으로 커밋 분류
+        
+        Args:
+            commit: 분류할 커밋 데이터
+            
+        Returns:
+            해당하는 커밋 크기 카테고리
+        """
+        if not self.diversity_config:
+            # 다양성 설정이 없으면 기본 분류
+            return CommitSizeCategory.categorize_by_lines(
+                commit.stats.total_lines_changed,
+                commit.stats.files_changed
+            )
+        
+        stats = commit.stats
+        total_lines = stats.total_lines_changed
+        files_changed = stats.files_changed
+        
+        # 설정에서 임계값 가져오기
+        thresholds = self.diversity_config.size_thresholds
+        
+        # 1차: 라인 수 기준 분류
+        if total_lines <= thresholds.extra_small_max:
+            base_category = CommitSizeCategory.EXTRA_SMALL
+        elif total_lines <= thresholds.small_max:
+            base_category = CommitSizeCategory.SMALL
+        elif total_lines <= thresholds.medium_max:
+            base_category = CommitSizeCategory.MEDIUM
+        elif total_lines <= thresholds.large_max:
+            base_category = CommitSizeCategory.LARGE
+        else:
+            base_category = CommitSizeCategory.EXTRA_LARGE
+        
+        # 2차: 파일 수 보정
+        correction = self.diversity_config.file_correction
+        
+        if files_changed >= correction.large_file_threshold:
+            # 파일 수가 많으면 최소 LARGE 카테고리로 상향 조정
+            categories = list(CommitSizeCategory)
+            base_index = categories.index(base_category)
+            large_index = categories.index(CommitSizeCategory.LARGE)
+            return categories[max(base_index, large_index)]
+        
+        elif files_changed == 1 and total_lines > correction.single_file_large_lines:
+            # 단일 파일에 많은 변경은 최대 LARGE로 제한
+            categories = list(CommitSizeCategory)
+            base_index = categories.index(base_category)
+            large_index = categories.index(CommitSizeCategory.LARGE)
+            return categories[min(base_index, large_index)]
+        
+        return base_category
+
+    def _select_diverse_commits(
+        self, 
+        commits: List[CommitData], 
+        count: int
+    ) -> List[CommitData]:
+        """다양성을 고려한 커밋 선택 (기존 _select_top_commits 대체)
+        
+        Args:
+            commits: 선택 대상 커밋 목록
+            count: 선택할 커밋 개수
+            
+        Returns:
+            선택된 커밋 목록
+        """
+        if not self.diversity_selector or not self.diversity_config.enabled:
+            self.logger.info("다양성 선택기가 비활성화됨. 기존 방식으로 선택합니다.")
+            return self._select_top_commits(commits, count)
+        
+        self.logger.info(f"다양성 기반 커밋 선택 시작: {len(commits)}개 중 {count}개 선택")
+        
+        try:
+            selected = self.diversity_selector.select_diverse_commits(commits, count)
+            self.logger.info(f"다양성 기반 선택 완료: {len(selected)}개 선택됨")
+            
+            # 선택 결과 보고서 생성 (디버그 모드)
+            if self.diversity_config.debug.export_selection_report:
+                report = self.diversity_selector.generate_selection_report(commits, selected)
+                self._log_selection_report(report)
+            
+            return selected
+            
+        except Exception as e:
+            self.logger.error(f"다양성 기반 선택 실패: {e}. 기존 방식으로 fallback합니다.")
+            return self._select_top_commits(commits, count)
+
+    def _calculate_diversity_adjusted_score(
+        self, 
+        commit: CommitData, 
+        category: CommitSizeCategory
+    ) -> int:
+        """다양성을 고려한 점수 조정
+        
+        Args:
+            commit: 점수를 조정할 커밋
+            category: 커밋의 크기 카테고리
+            
+        Returns:
+            조정된 점수
+        """
+        base_score = commit.score.total_score
+        
+        if not self.diversity_config:
+            return base_score
+        
+        category_config = self.diversity_config.categories.get(category.value)
+        if not category_config:
+            return base_score
+        
+        score_boost = category_config.score_boost
+        return base_score + score_boost
+
+    def _log_selection_report(self, report):
+        """선택 결과 보고서 로깅"""
+        self.logger.info("=== 커밋 선택 보고서 ===")
+        self.logger.info(f"총 커밋: {report.total_available}개 → 선택: {report.total_selected}개")
+        
+        for category_name, distribution in report.category_distributions.items():
+            original = distribution["original"]
+            selected = distribution["selected"]
+            ratio = selected / original if original > 0 else 0
+            self.logger.info(f"{category_name}: {selected}/{original}개 ({ratio:.1%})")
     
     def _execute_git_command(self, command: str, cwd: str) -> ToolResult:
         """Git 명령어 실행"""
